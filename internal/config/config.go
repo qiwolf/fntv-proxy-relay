@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -12,13 +13,17 @@ import (
 
 // Config 配置结构
 type Config struct {
-	ListenAddr string        `mapstructure:"listen"`
-	TargetAddr string        `mapstructure:"target"`
-	LogLevel   string        `mapstructure:"log_level"`
-	LogDir     string        `mapstructure:"log_dir"`
-	CacheTTL   time.Duration `mapstructure:"cache_ttl"` // 直链缓存 TTL（复用原有配置名）
-	Emby       EmbyConfig    `mapstructure:"emby"`
-	mutex      sync.RWMutex
+	ListenAddr       string        `mapstructure:"listen"`
+	TargetAddr       string        `mapstructure:"target"`
+	LogLevel         string        `mapstructure:"log_level"`
+	LogDir           string        `mapstructure:"log_dir"`
+	CacheTTL         time.Duration `mapstructure:"cache_ttl"` // 直链缓存 TTL（复用原有配置名）
+	StreamMode       string        `mapstructure:"stream_mode"`
+	AllowedUpstreams []string      `mapstructure:"allowed_upstreams"`
+	AllowedStrmRoots []string      `mapstructure:"allowed_strm_roots"`
+	PublicBaseURL    string        `mapstructure:"public_base_url"`
+	Emby             EmbyConfig    `mapstructure:"emby"`
+	mutex            sync.RWMutex
 }
 
 // Global 全局配置实例
@@ -28,6 +33,7 @@ var Global = &Config{
 	LogLevel:   "info",
 	LogDir:     "./logs",
 	CacheTTL:   60 * time.Minute, // 默认直链缓存1小时
+	StreamMode: "redirect",
 }
 
 // Load 加载配置
@@ -49,6 +55,7 @@ func Load(configPath string) error {
 	viper.SetDefault("log_level", "info")
 	viper.SetDefault("log_dir", "./logs")
 	viper.SetDefault("cache_ttl", 60)
+	viper.SetDefault("stream_mode", "redirect")
 	viper.SetDefault("emby.enabled", false)
 	viper.SetDefault("emby.listen", ":8095")
 	viper.SetDefault("emby.target", "http://127.0.0.1:8096")
@@ -75,6 +82,9 @@ func Load(configPath string) error {
 	// 转换 cache_ttl 为 Duration（用于直链缓存）
 	Global.CacheTTL = time.Duration(viper.GetInt("cache_ttl")) * time.Minute
 	initEmbyDefaults()
+	if err := Global.Validate(); err != nil {
+		return err
+	}
 
 	log.Printf("✅ 配置加载完成: %s", viper.ConfigFileUsed())
 	log.Printf("📦 直链缓存TTL: %v", Global.CacheTTL)
@@ -139,6 +149,11 @@ func handleConfigChange(configFile string, onChange func()) {
 	}
 	Global.CacheTTL = time.Duration(viper.GetInt("cache_ttl")) * time.Minute
 	initEmbyDefaults()
+	if err := Global.Validate(); err != nil {
+		Global.mutex.Unlock()
+		log.Printf("❌ 配置校验失败: %v", err)
+		return
+	}
 	Global.mutex.Unlock()
 
 	log.Println("✅ 配置已热重载")
@@ -174,6 +189,51 @@ func (c *Config) GetCacheTTL() time.Duration {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 	return c.CacheTTL
+}
+
+func (c *Config) GetStreamMode() string {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	return strings.ToLower(strings.TrimSpace(c.StreamMode))
+}
+
+func (c *Config) GetAllowedUpstreams() []string {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	return append([]string(nil), c.AllowedUpstreams...)
+}
+
+func (c *Config) GetAllowedStrmRoots() []string {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	return append([]string(nil), c.AllowedStrmRoots...)
+}
+
+func (c *Config) GetPublicBaseURL() string {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	return strings.TrimRight(strings.TrimSpace(c.PublicBaseURL), "/")
+}
+
+// Validate rejects unsafe relay configurations before the listener starts.
+func (c *Config) Validate() error {
+	mode := strings.ToLower(strings.TrimSpace(c.StreamMode))
+	if mode == "" {
+		mode = "redirect"
+		c.StreamMode = mode
+	}
+	if mode != "redirect" && mode != "relay" {
+		return fmt.Errorf("stream_mode must be redirect or relay")
+	}
+	if mode == "relay" {
+		if len(c.AllowedUpstreams) == 0 {
+			return fmt.Errorf("allowed_upstreams is required in relay mode")
+		}
+		if len(c.AllowedStrmRoots) == 0 {
+			return fmt.Errorf("allowed_strm_roots is required in relay mode")
+		}
+	}
+	return nil
 }
 
 // SetLogLevel 设置日志级别（热重载用）

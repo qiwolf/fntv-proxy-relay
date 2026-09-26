@@ -1,0 +1,15 @@
+listen: ":28005"
+target: "http://127.0.0.1:8005"
+log_level: "info"
+log_dir: "/app/logs"
+cache_ttl: 60
+
+stream_mode: "relay"
+public_base_url: "https://fn.example.com"
+allowed_upstreams:
+  - "192.168.1.20:5244"
+allowed_strm_roots:
+  - "/vol00/strm"
+
+emby:
+  enabled: false

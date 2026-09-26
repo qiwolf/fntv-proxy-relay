@@ -1,8 +1,13 @@
-# FNTV Proxy
+# FNTV Proxy Relay
 
-飞牛影视 / Emby 代理工具 - 自动解析 `.strm` 文件并重定向到真实直链
+飞牛影视 / Emby 代理工具——自动解析 `.strm` 文件，可选 302 重定向或服务端流式回源。
 
-- 基于**飞牛影视 0.9.3** 版本
+本分支重点解决：飞牛影视把 `.strm` 解析得到的内网媒体 URL 直接交给公网客户端，导致客户端无法连接的问题。代理会把飞牛影视 0.9.8 stream API 响应中的允许地址改写为同源临时令牌，再由服务器支持 Range 地流式回源。
+
+> [!IMPORTANT]
+> 本仓库派生自 [jimboo7339/fntv-proxy](https://github.com/jimboo7339/fntv-proxy)。上游当前未提供明确 LICENSE；公开源码或容器不等于授予再分发或商业使用许可，详见 [NOTICE.md](NOTICE.md)。
+
+- 兼容旧版飞牛影视代理路径，并适配**飞牛影视 0.9.8** 的 `/v/api/v1/stream`
 - 可选启用 **Emby 302 代理**（与飞牛代理独立运行，互不影响）
 - 已测试夸克网盘生成的 strm
 - 已测试 115 网盘生成的 strm [#1](https://github.com/jimboo7339/fntv-proxy/issues/1)
@@ -15,6 +20,9 @@
 - ✅ 透明代理飞牛影视服务
 - ✅ 自动缓存 PlaybackInfo 中的 `.strm` MediaSource
 - ✅ 拦截视频流请求，返回 302 重定向到真实 URL
+- ✅ 可选 relay 模式，支持 GET/HEAD、Range/If-Range 和 206 透传
+- ✅ relay 模式逐跳校验上游允许列表，并限制 `.strm` 可读根目录
+- ✅ 兼容飞牛影视 0.9.8 `POST /v/api/v1/stream`，将 JSON 中内网直链改写为同源临时令牌代理
 - ✅ 支持日志级别配置
 - ✅ 缓存过期时间可配置
 - ✅ 优雅关闭
@@ -35,6 +43,18 @@
 3. 将播放器地址指向代理端口（飞牛 `:28005`，Emby `:8095`）
 
 > `config.yaml` 已加入 `.gitignore`，本地内网地址不会被提交到仓库。
+
+完整的网络结构、Docker Compose、Nginx、安全限制、验收与回滚步骤见 [STRM Relay 部署指南](docs/RELAY_DEPLOYMENT.md)。
+
+## 容器镜像
+
+GitHub Release 标签会自动构建 `linux/amd64`、`linux/arm64` 镜像并发布到 GHCR：
+
+```bash
+docker pull ghcr.io/qiwolf/fntv-proxy-relay:latest
+```
+
+生产环境建议固定版本标签，不要长期使用 `latest`。
 
 ## 配置文件
 
@@ -57,6 +77,15 @@ log_dir: "./logs"
 
 # 直链缓存过期时间（分钟），默认 60
 cache_ttl: 60
+
+# redirect（默认）或 relay
+stream_mode: "relay"
+public_base_url: "https://fn.example.com"
+allowed_upstreams:
+  - "192.168.1.20:5244"
+  - "media-cdn.example.com"
+allowed_strm_roots:
+  - "/vol00/strm"
 
 # Emby 302 代理（默认关闭，不影响飞牛代理）
 emby:
@@ -82,6 +111,17 @@ emby:
 | `emby.strm_path_map` | strm 文件内 URL 片段替换，格式 `旧地址 => 新地址` | 无 |
 
 启用 Emby 后，客户端应连接代理地址（如 `http://服务器IP:8095`），而非直连 Emby 端口。
+
+### 飞牛 relay 配置说明
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| `stream_mode` | `redirect` 返回 302；`relay` 从服务器回源并流式转发 | `redirect` |
+| `allowed_upstreams` | relay 必填，精确列出 `host` 或 `host:port`；每次重定向都重新检查 | 无 |
+| `allowed_strm_roots` | relay 必填，可读 `.strm` 根目录；使用真实路径阻止符号链接逃逸 | 无 |
+| `public_base_url` | 0.9.8 stream API 临时代理地址的公网基础 URL；留空时返回相对路径 | 空 |
+
+`allowed_upstreams` 中不带端口的主机名只允许 HTTP/HTTPS 默认端口。内网源站使用非标准端口时必须写明端口。relay 不会转发客户端的 `Authorization` 或 Cookie，但 `.strm` URL 自身携带的 Basic Auth 仍由 Go HTTP 客户端使用。更改 relay 相关配置后需重启进程。
 
 ## Docker Compose 配置
 
@@ -114,6 +154,7 @@ services:
 | `CONFIG` | 配置文件路径 | `./config.yaml` |
 | `TZ` | 时区 | `Asia/Shanghai` |
 | `FNTV_CACHE_TTL` | 直链缓存过期时间（分钟） | `60` |
+| `FNTV_STREAM_MODE` | 飞牛流处理模式：`redirect` / `relay` | `redirect` |
 | `FNTV_EMBY_ENABLED` | 是否启用 Emby 代理 | `false` |
 | `FNTV_EMBY_LISTEN` | Emby 代理监听地址 | `:8095` |
 | `FNTV_EMBY_TARGET` | Emby 源站地址 | `http://127.0.0.1:8096` |
@@ -124,7 +165,7 @@ services:
 
 | 级别 | 输出位置 | 说明 |
 |------|---------|------|
-| `trace` | 文件 | **最详细**，记录完整请求/响应头、体（排查问题用） |
+| `trace` | 文件 | **最详细**，请求查询、敏感头和体会脱敏（排查问题用） |
 | `debug` | 控制台 + 文件 | 记录所有请求和响应 |
 | `info` | 控制台 | 只输出关键信息（推荐生产环境） |
 | `warn` | 控制台 | 只输出警告和错误 |
@@ -142,11 +183,11 @@ log_dir: "./logs"
 ```
 === REQUEST ===
 Method: GET
-URL: /Items/xxx/PlaybackInfo?MediaSourceId=yyy
+URL: /Items/xxx/PlaybackInfo
 Headers:
   User-Agent: xxx
-  Authorization: xxx
-Body: {...}
+  Authorization: [REDACTED]
+Body: [REDACTED, 123 bytes]
 ===============
 === RESPONSE ===
 Request: GET /Items/xxx/PlaybackInfo

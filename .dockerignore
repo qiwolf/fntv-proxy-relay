@@ -1,0 +1,9 @@
+.git
+.github
+.idea
+.vscode
+config.yaml
+logs
+*.log
+fntv-proxy
+deploy

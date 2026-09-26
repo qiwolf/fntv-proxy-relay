@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"fntv-proxy/internal/cache"
 	"fntv-proxy/internal/config"
 	"fntv-proxy/internal/handler"
@@ -42,7 +43,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 
 	// 创建处理器
 	ph := handler.NewPlaybackHandler(c, log)
-	sh := handler.NewStreamHandler(c, log)
+	sh := handler.NewStreamHandler(c, log, cfg.GetStreamMode(), cfg.GetAllowedUpstreams(), cfg.GetAllowedStrmRoots(), cfg.GetPublicBaseURL())
 
 	// 创建反向代理
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
@@ -64,6 +65,9 @@ func (s *Server) Start() error {
 	s.proxy.Director = func(req *http.Request) {
 		originalDirector(req)
 		req.Host = s.config.GetTargetAddr()
+		if s.isStreamAPIRequest(req) {
+			req.Header.Del("Accept-Encoding")
+		}
 	}
 
 	// 设置ModifyResponse
@@ -97,6 +101,26 @@ func (s *Server) Reload() {
 
 // handleResponse 处理响应
 func (s *Server) handleResponse(resp *http.Response) error {
+	if s.isStreamAPIRequest(resp.Request) {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+		_ = resp.Body.Close()
+		newBody, count, err := s.streamHandler.RewriteStreamAPIResponse(body)
+		if err != nil {
+			s.logger.Warn("fnOS stream API response rewrite failed: %v", err)
+			newBody = body
+		}
+		if count > 0 {
+			s.logger.Info("rewrote %d fnOS stream API URL(s) to relay", count)
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(newBody))
+		resp.ContentLength = int64(len(newBody))
+		resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(newBody)))
+		resp.Header.Del("Content-Encoding")
+		return nil
+	}
 	// 只处理 PlaybackInfo，其他响应直接透传（避免读取大文件到内存）
 	if !s.isPlaybackInfoRequest(resp.Request) {
 		return nil
@@ -123,6 +147,10 @@ func (s *Server) handleResponse(resp *http.Response) error {
 	return nil
 }
 
+func (s *Server) isStreamAPIRequest(req *http.Request) bool {
+	return req != nil && req.Method == http.MethodPost && strings.EqualFold(req.URL.Path, "/v/api/v1/stream")
+}
+
 // logResponseBody 记录响应体（trace级别）
 func (s *Server) logResponseBody(resp *http.Response, body []byte) {
 	s.logger.Trace("=== RESPONSE BODY ===")
@@ -130,16 +158,15 @@ func (s *Server) logResponseBody(resp *http.Response, body []byte) {
 	s.logger.Trace("Status: %d", resp.StatusCode)
 	s.logger.Trace("Headers:")
 	for name, values := range resp.Header {
+		if isSensitiveHeader(name) {
+			s.logger.Trace("  %s: [REDACTED]", name)
+			continue
+		}
 		for _, v := range values {
 			s.logger.Trace("  %s: %s", name, v)
 		}
 	}
-	// 限制Body大小，避免日志过大
-	bodyStr := string(body)
-	if len(bodyStr) > 10000 {
-		bodyStr = bodyStr[:10000] + "... (truncated)"
-	}
-	s.logger.Trace("Body: %s", bodyStr)
+	s.logger.Trace("Body: [REDACTED, %d bytes]", len(body))
 	s.logger.Trace("=====================")
 }
 
@@ -168,16 +195,13 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 			s.logRequest(r)
 		}
 
-		// 包装ResponseWriter以捕获响应
-		wrapped := &responseRecorder{ResponseWriter: w, statusCode: 200}
-
 		// 检查是否是视频流请求
-		if s.streamHandler.Handle(wrapped, r) {
+		if s.streamHandler.Handle(w, r) {
 			return // 已处理，直接返回
 		}
 
 		// 继续处理
-		next.ServeHTTP(wrapped, r)
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -194,37 +218,30 @@ func (s *Server) logRequest(r *http.Request) []byte {
 	// 记录请求详情
 	s.logger.Trace("=== REQUEST ===")
 	s.logger.Trace("Method: %s", r.Method)
-	s.logger.Trace("URL: %s", r.URL.String())
+	s.logger.Trace("URL: %s", r.URL.EscapedPath())
 	s.logger.Trace("Headers:")
 	for name, values := range r.Header {
+		if isSensitiveHeader(name) {
+			s.logger.Trace("  %s: [REDACTED]", name)
+			continue
+		}
 		for _, v := range values {
 			s.logger.Trace("  %s: %s", name, v)
 		}
 	}
 	if len(body) > 0 {
-		// 限制Body大小
-		bodyStr := string(body)
-		if len(bodyStr) > 10000 {
-			bodyStr = bodyStr[:10000] + "... (truncated)"
-		}
-		s.logger.Trace("Body: %s", bodyStr)
+		s.logger.Trace("Body: [REDACTED, %d bytes]", len(body))
 	}
 	s.logger.Trace("===============")
 
 	return body
 }
 
-// responseRecorder 包装ResponseWriter以捕获状态码
-type responseRecorder struct {
-	http.ResponseWriter
-	statusCode int
-	written    bool
-}
-
-func (rec *responseRecorder) WriteHeader(code int) {
-	if !rec.written {
-		rec.statusCode = code
-		rec.written = true
-		rec.ResponseWriter.WriteHeader(code)
+func isSensitiveHeader(name string) bool {
+	switch strings.ToLower(name) {
+	case "authorization", "proxy-authorization", "cookie", "set-cookie", "x-emby-token", "x-mediabrowser-token":
+		return true
+	default:
+		return false
 	}
 }

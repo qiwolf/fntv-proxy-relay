@@ -4,6 +4,21 @@ log_level: "info"
 log_dir: "./logs"
 cache_ttl: 60  # 缓存过期时间（分钟），默认1小时
 
+# 播放模式：redirect 保持原有 302 行为；relay 由本服务流式回源
+stream_mode: "redirect"
+
+# fnOS 0.9.8 /v/api/v1/stream 直链改写后对外返回的基础 URL；留空则使用相对路径
+# public_base_url: "https://fn.example.com"
+
+# relay 模式必填。每一次重定向都会检查 host[:port]
+# allowed_upstreams:
+#   - "192.168.1.20:5244"
+#   - "media-cdn.example.com"
+
+# relay 模式必填。只允许读取这些目录内的 .strm（会解析符号链接）
+# allowed_strm_roots:
+#   - "/vol00/strm"
+
 # Emby 302 代理（默认关闭，不影响现有飞牛代理）
 emby:
   enabled: false

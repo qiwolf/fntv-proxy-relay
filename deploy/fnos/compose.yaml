@@ -1,0 +1,18 @@
+name: fntv-proxy-relay
+
+services:
+  fntv-proxy-relay:
+    build:
+      context: .
+      dockerfile: Dockerfile.runtime
+    image: fntv-proxy-relay:local
+    container_name: fntv-proxy-relay
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      CONFIG: /app/config.yaml
+      TZ: Asia/Shanghai
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./logs:/app/logs
+      - /vol00/strm:/vol00/strm:ro

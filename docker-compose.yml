@@ -1,13 +1,11 @@
 services:
-  fntv-proxy:
-    image: jimboo7339/fntv-proxy:latest
-    container_name: fntv-proxy
-    ports:
-      - "28005:28005"
-      - "8095:8095"   # Emby 代理（emby.enabled: true 时需要）
+  fntv-proxy-relay:
+    image: ghcr.io/qiwolf/fntv-proxy-relay:latest
+    container_name: fntv-proxy-relay
+    network_mode: host
     volumes:
       # 挂载strm文件目录（根据实际路径修改）
-      - /vol00:/vol00:ro
+      - /vol00/strm:/vol00/strm:ro
       # 挂载配置文件（可选，用于热重载）
       - ./config.yaml:/app/config.yaml:ro
       # 可选：挂载日志目录（debug模式）
@@ -16,5 +14,4 @@ services:
       # 配置文件路径
       - CONFIG=/app/config.yaml
     restart: unless-stopped
-    # 使用host网络可以访问本机8005
-    # network_mode: host
+    # 若不使用 host 网络，请删除 network_mode 并映射 28005/8095 端口。

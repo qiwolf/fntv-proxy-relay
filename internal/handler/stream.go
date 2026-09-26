@@ -1,181 +1,389 @@
 package handler
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"fntv-proxy/internal/cache"
 	"fntv-proxy/internal/logger"
+	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"path/filepath"
 	"strings"
 )
 
-// StreamHandler 处理视频流请求
+const maxRedirects = 10
+const relayPathPrefix = "/fntv-relay/"
+
+// StreamHandler handles FNTV stream requests either by legacy redirect or by
+// relaying bytes from the URL stored in the .strm file.
 type StreamHandler struct {
-	cache  *cache.Cache
-	logger *logger.Logger
-	client *http.Client
+	cache            *cache.Cache
+	logger           *logger.Logger
+	client           *http.Client
+	mode             string
+	allowedUpstreams map[string]struct{}
+	allowedStrmRoots []string
+	publicBaseURL    string
 }
 
-// NewStreamHandler 创建处理器
-func NewStreamHandler(c *cache.Cache, l *logger.Logger) *StreamHandler {
-	return &StreamHandler{
-		cache:  c,
-		logger: l,
-		client: &http.Client{
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				// 不自动跟随重定向，返回最后一个响应
-				return http.ErrUseLastResponse
-			},
-		},
+func NewStreamHandler(c *cache.Cache, l *logger.Logger, mode string, allowedUpstreams, allowedStrmRoots []string, publicBaseURL ...string) *StreamHandler {
+	h := &StreamHandler{
+		cache:            c,
+		logger:           l,
+		mode:             strings.ToLower(strings.TrimSpace(mode)),
+		allowedUpstreams: make(map[string]struct{}, len(allowedUpstreams)),
+		allowedStrmRoots: append([]string(nil), allowedStrmRoots...),
 	}
+	if len(publicBaseURL) > 0 {
+		h.publicBaseURL = strings.TrimRight(strings.TrimSpace(publicBaseURL[0]), "/")
+	}
+	if h.mode == "" {
+		h.mode = "redirect"
+	}
+	for _, upstream := range allowedUpstreams {
+		if normalized := normalizeAllowedUpstream(upstream); normalized != "" {
+			h.allowedUpstreams[normalized] = struct{}{}
+		}
+	}
+	h.client = &http.Client{CheckRedirect: h.checkRedirect}
+	return h
 }
 
-// Handle 处理stream.mp4请求
 func (h *StreamHandler) Handle(w http.ResponseWriter, r *http.Request) bool {
-	// 检查是否是视频流请求
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if strings.HasPrefix(r.URL.Path, relayPathPrefix) {
+		return h.handleAPIRelay(w, r)
+	}
 	if !isStreamRequest(r) {
 		return false
 	}
-
-	h.logger.Info("🎬 拦截到视频流请求: %s", r.URL.Path)
-
-	// 获取MediaSourceId
 	mediaSourceID := r.URL.Query().Get("MediaSourceId")
-
-	// 从缓存查找（先按MediaSourceId查，找不到再按ItemId查）
 	source, found := h.findInCache(r, mediaSourceID)
+	if !found || !strings.EqualFold(filepath.Ext(source.Path), ".strm") {
+		return false
+	}
+	h.logger.Info("🎬 拦截到视频流请求: %s", r.URL.Path)
+	if h.mode == "relay" {
+		return h.handleRelay(w, r, source)
+	}
+	return h.handleRedirect(w, r, source)
+}
+
+func (h *StreamHandler) handleAPIRelay(w http.ResponseWriter, r *http.Request) bool {
+	token := strings.TrimPrefix(r.URL.Path, relayPathPrefix)
+	if len(token) != 32 || strings.Contains(token, "/") {
+		http.NotFound(w, r)
+		return true
+	}
+	if _, err := hex.DecodeString(token); err != nil {
+		http.NotFound(w, r)
+		return true
+	}
+	entry, found := h.cache.GetStreamURL("api:" + token)
 	if !found {
-		h.logger.Warn("❌ MediaSourceId %s 和 ItemId 都不在缓存中", mediaSourceID)
-		return false
+		http.Error(w, "relay URL expired", http.StatusGone)
+		return true
 	}
+	return h.relayURL(w, r, entry.URL)
+}
 
-	// 检查是否是.strm
-	if !strings.HasSuffix(source.Path, ".strm") {
-		h.logger.Info("ℹ️ 不是.strm文件，直接转发")
-		return false
-	}
-
-	// 尝试从缓存获取直链
+func (h *StreamHandler) handleRedirect(w http.ResponseWriter, r *http.Request, source cache.MediaSource) bool {
 	if streamURL, found := h.cache.GetStreamURL(source.ID); found {
-		h.logger.Info("✅ 从缓存获取直链: %s", streamURL.URL)
-		h.logDirectLinkType(streamURL.URL)
+		h.logger.Info("✅ 从缓存获取直链: %s", safeURLForLog(streamURL.URL))
 		w.Header().Set("Location", streamURL.URL)
 		w.WriteHeader(http.StatusFound)
 		return true
 	}
-
-	// 读取.strm文件
-	strmURL, err := ReadStrmFile(source.Path)
+	strmURL, err := h.readStrm(source.Path, false)
 	if err != nil {
 		h.logger.Error("❌ 读取.strm失败: %v", err)
 		return false
 	}
-
-	h.logger.Info("📄 strm内容: %s", strmURL)
-
-	// 请求strm URL，获取最终地址（透传原始请求的UA）
 	finalURL, err := h.resolveURL(strmURL, r)
 	if err != nil {
-		h.logger.Error("❌ 解析URL失败: %v", err)
+		h.logger.Error("❌ 解析URL失败")
 		return false
 	}
-
-	h.logger.Info("✅ 最终地址: %s", finalURL)
-	h.logDirectLinkType(finalURL)
-
-	// 缓存直链
+	h.logger.Info("✅ 最终地址: %s", safeURLForLog(finalURL))
 	h.cache.SetStreamURL(source.ID, finalURL)
-	h.logger.Info("💾 已缓存直链到 MediaSourceId: %s", source.ID)
-
-	// 返回302重定向到最终地址
 	w.Header().Set("Location", finalURL)
 	w.WriteHeader(http.StatusFound)
 	return true
 }
 
-func (h *StreamHandler) logDirectLinkType(finalURL string) {
-	linkType := ClassifyDirectLink(finalURL)
-	h.logger.Info("📡 直链类型: %s → %s", linkType, DirectLinkMetaHint(linkType))
+func (h *StreamHandler) handleRelay(w http.ResponseWriter, r *http.Request, source cache.MediaSource) bool {
+	strmURL, err := h.readStrm(source.Path, true)
+	if err != nil {
+		h.logger.Warn("relay denied .strm path: %v", err)
+		http.Error(w, "media source is not allowed", http.StatusForbidden)
+		return true
+	}
+	// Resolve the .strm URL for every relay request. Final CDN URLs are often
+	// signed and short-lived, so caching them can break later Range seeks.
+	return h.relayURL(w, r, strmURL)
 }
 
-// resolveURL 请求URL，跟随重定向，返回最终地址
-// 透传原始请求的UA
+func (h *StreamHandler) relayURL(w http.ResponseWriter, r *http.Request, upstreamURL string) bool {
+	parsed, err := url.Parse(upstreamURL)
+	if err != nil || !h.isAllowedURL(parsed) {
+		h.logger.Warn("relay denied upstream: %s", safeURLForLog(upstreamURL))
+		http.Error(w, "media upstream is not allowed", http.StatusForbidden)
+		return true
+	}
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, parsed.String(), nil)
+	if err != nil {
+		http.Error(w, "invalid media upstream", http.StatusBadGateway)
+		return true
+	}
+	for _, name := range []string{"Range", "If-Range", "If-None-Match", "If-Modified-Since", "User-Agent"} {
+		copyRequestHeader(req.Header, r.Header, name)
+	}
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", "fntv-proxy-relay/1")
+	}
+	resp, err := h.client.Do(req)
+	if err != nil {
+		h.logger.Error("relay upstream request failed for %s", safeURLForLog(upstreamURL))
+		http.Error(w, "media upstream unavailable", http.StatusBadGateway)
+		return true
+	}
+	defer resp.Body.Close()
+	if resp.Request != nil && resp.Request.URL != nil {
+		h.logger.Info("relay upstream: %s status=%d", safeURLForLog(resp.Request.URL.String()), resp.StatusCode)
+	}
+	copyRelayResponseHeaders(w.Header(), resp.Header)
+	w.WriteHeader(resp.StatusCode)
+	if r.Method == http.MethodHead {
+		return true
+	}
+	if _, err := io.Copy(w, resp.Body); err != nil && !errors.Is(err, r.Context().Err()) {
+		h.logger.Warn("relay stream interrupted: %v", err)
+	}
+	return true
+}
+
+// RewriteStreamAPIResponse rewrites allowlisted absolute media URLs returned
+// by fnOS 0.9.8 POST /v/api/v1/stream to same-origin relay URLs.
+func (h *StreamHandler) RewriteStreamAPIResponse(body []byte) ([]byte, int, error) {
+	var payload any
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&payload); err != nil {
+		return body, 0, err
+	}
+	rewritten := make(map[string]string)
+	count, err := h.rewriteJSONURLs(&payload, rewritten)
+	if err != nil || count == 0 {
+		return body, count, err
+	}
+	result, err := json.Marshal(payload)
+	if err != nil {
+		return body, 0, err
+	}
+	return result, count, nil
+}
+
+func (h *StreamHandler) rewriteJSONURLs(value *any, rewritten map[string]string) (int, error) {
+	switch current := (*value).(type) {
+	case map[string]any:
+		total := 0
+		for key, child := range current {
+			count, err := h.rewriteJSONURLs(&child, rewritten)
+			if err != nil {
+				return total, err
+			}
+			current[key] = child
+			total += count
+		}
+		return total, nil
+	case []any:
+		total := 0
+		for i, child := range current {
+			count, err := h.rewriteJSONURLs(&child, rewritten)
+			if err != nil {
+				return total, err
+			}
+			current[i] = child
+			total += count
+		}
+		return total, nil
+	case string:
+		parsed, err := url.Parse(current)
+		if err != nil || !h.isAllowedURL(parsed) {
+			return 0, nil
+		}
+		if replacement, ok := rewritten[current]; ok {
+			*value = replacement
+			return 1, nil
+		}
+		random := make([]byte, 16)
+		if _, err := rand.Read(random); err != nil {
+			return 0, err
+		}
+		token := hex.EncodeToString(random)
+		replacement := h.publicBaseURL + relayPathPrefix + token
+		if h.publicBaseURL == "" {
+			replacement = relayPathPrefix + token
+		}
+		h.cache.SetStreamURL("api:"+token, current)
+		rewritten[current] = replacement
+		*value = replacement
+		return 1, nil
+	default:
+		return 0, nil
+	}
+}
+
+func (h *StreamHandler) readStrm(path string, enforceRoots bool) (string, error) {
+	if enforceRoots {
+		allowed, err := pathWithinRoots(path, h.allowedStrmRoots)
+		if err != nil {
+			return "", err
+		}
+		if !allowed {
+			return "", fmt.Errorf("path is outside allowed_strm_roots")
+		}
+	}
+	return ReadStrmFile(path)
+}
+
+func pathWithinRoots(path string, roots []string) (bool, error) {
+	realPath, err := filepath.EvalSymlinks(filepath.Clean(strings.ReplaceAll(path, "\\", "/")))
+	if err != nil {
+		return false, err
+	}
+	realPath, err = filepath.Abs(realPath)
+	if err != nil {
+		return false, err
+	}
+	for _, root := range roots {
+		realRoot, err := filepath.EvalSymlinks(filepath.Clean(root))
+		if err != nil {
+			continue
+		}
+		realRoot, err = filepath.Abs(realRoot)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(realRoot, realPath)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func normalizeAllowedUpstream(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if parsed, err := url.Parse(value); err == nil && parsed.Host != "" {
+		return strings.ToLower(parsed.Host)
+	}
+	return strings.ToLower(value)
+}
+
+func (h *StreamHandler) isAllowedURL(u *url.URL) bool {
+	if u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return false
+	}
+	if _, exact := h.allowedUpstreams[strings.ToLower(u.Host)]; exact {
+		return true
+	}
+	host := strings.ToLower(u.Hostname())
+	if _, hostOnly := h.allowedUpstreams[host]; !hostOnly {
+		return false
+	}
+	port := u.Port()
+	return port == "" || (u.Scheme == "http" && port == "80") || (u.Scheme == "https" && port == "443")
+}
+
+func (h *StreamHandler) checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("too many redirects")
+	}
+	if h.mode == "relay" && !h.isAllowedURL(req.URL) {
+		return fmt.Errorf("redirect upstream %s is not allowed", safeURLForLog(req.URL.String()))
+	}
+	return nil
+}
+
 func (h *StreamHandler) resolveURL(urlStr string, originalReq *http.Request) (string, error) {
-	req, err := http.NewRequest("GET", urlStr, nil)
+	req, err := http.NewRequestWithContext(originalReq.Context(), http.MethodGet, urlStr, nil)
 	if err != nil {
 		return "", err
 	}
-
-	// 透传原始请求的UA
-	originalUA := originalReq.Header.Get("User-Agent")
-	if originalUA != "" {
-		req.Header.Set("User-Agent", originalUA)
-		h.logger.Debug("透传UA: %s", originalUA)
-	} else {
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0")
-	}
-
+	copyRequestHeader(req.Header, originalReq.Header, "User-Agent")
 	resp, err := h.client.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-
-	// 如果是302/301，获取Location头
-	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusMovedPermanently {
-		location := resp.Header.Get("Location")
-		if location != "" {
-			return location, nil
-		}
+	if resp.Request != nil && resp.Request.URL != nil {
+		return resp.Request.URL.String(), nil
 	}
-
-	// 如果不是重定向，返回原始URL
 	return urlStr, nil
 }
 
-// findInCache 从缓存查找MediaSource（支持MediaSourceId和ItemId）
+func copyRequestHeader(dst, src http.Header, name string) {
+	if value := src.Get(name); value != "" {
+		dst.Set(name, value)
+	}
+}
+
+func copyRelayResponseHeaders(dst, src http.Header) {
+	for _, name := range []string{"Accept-Ranges", "Cache-Control", "Content-Disposition", "Content-Length", "Content-Range", "Content-Type", "ETag", "Last-Modified"} {
+		for _, value := range src.Values(name) {
+			dst.Add(name, value)
+		}
+	}
+}
+
+func safeURLForLog(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "[invalid-url]"
+	}
+	host := u.Hostname()
+	if port := u.Port(); port != "" {
+		host = net.JoinHostPort(host, port)
+	}
+	return u.Scheme + "://" + host + u.EscapedPath()
+}
+
 func (h *StreamHandler) findInCache(r *http.Request, mediaSourceID string) (cache.MediaSource, bool) {
-	// 1. 先按MediaSourceId查找
 	if mediaSourceID != "" {
 		if source, found := h.cache.Get(mediaSourceID); found {
-			h.logger.Info("✅ 通过 MediaSourceId 找到缓存: %s", mediaSourceID)
 			return source, true
 		}
 	}
-
-	// 2. 从URL路径提取ItemId查找
 	itemID := extractItemID(r.URL.Path)
 	if itemID != "" {
-		if source, found := h.cache.GetByItemID(itemID); found {
-			h.logger.Info("✅ 通过 ItemId 找到缓存: %s", itemID)
-			return source, true
-		}
+		return h.cache.GetByItemID(itemID)
 	}
-
 	return cache.MediaSource{}, false
 }
 
-// extractItemID 从URL路径提取ItemId
-// 例如: /emby/videos/064d9e7c19cb41ed884bcf8e22e64f80/stream.MKV
 func extractItemID(path string) string {
-	// 移除前缀 /emby
 	path = strings.TrimPrefix(path, "/emby")
-
-	// 匹配 /videos/{itemId}/ 或 /Items/{itemId}/
 	parts := strings.Split(path, "/")
 	for i, part := range parts {
-		if (part == "videos" || part == "Items") && i+1 < len(parts) {
-			itemID := parts[i+1]
-			// 验证是32位十六进制
-			if len(itemID) == 32 {
-				return itemID
-			}
+		if (part == "videos" || part == "Items") && i+1 < len(parts) && len(parts[i+1]) == 32 {
+			return parts[i+1]
 		}
 	}
 	return ""
 }
 
-// isStreamRequest 检查是否是视频流请求
 func isStreamRequest(r *http.Request) bool {
 	path := strings.ToLower(r.URL.Path)
-	return strings.Contains(path, "/stream.") ||
-		strings.Contains(path, "/master.m3u8")
+	return strings.Contains(path, "/stream.") || strings.Contains(path, "/master.m3u8")
 }

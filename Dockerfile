@@ -1,16 +1,16 @@
 # 构建阶段
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
 # 复制源码
 COPY . .
 
-# 编译
-RUN go build -o fntv-proxy ./cmd/main.go
+# 编译为静态、可复现性更好的发布二进制
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o fntv-proxy ./cmd/main.go
 
 # 运行阶段
-FROM alpine:latest
+FROM alpine:3.22
 
 WORKDIR /app
 
