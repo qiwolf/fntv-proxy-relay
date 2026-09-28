@@ -3,16 +3,19 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"fntv-proxy/internal/cache"
 	"fntv-proxy/internal/config"
 	"fntv-proxy/internal/handler"
 	"fntv-proxy/internal/logger"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,11 +27,20 @@ type Server struct {
 	playbackHandler *handler.PlaybackHandler
 	streamHandler   *handler.StreamHandler
 	proxy           *httputil.ReverseProxy
+	mediaHandler    *handler.MediaHandler
 	httpServer      *http.Server
+	mu              sync.Mutex
+	servers         []*http.Server
+	stopping        bool
+	started         bool
+	stopCache       sync.Once
 }
 
 // NewServer 创建代理服务器
 func NewServer(cfg *config.Config) (*Server, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	// 创建日志
 	log := logger.New(cfg.GetLogLevel(), cfg.LogDir)
 
@@ -39,7 +51,11 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	}
 
 	// 创建缓存（直链缓存使用 cache_ttl，MediaSource 不过期）
-	c := cache.NewWithStreamTTL(cfg.GetCacheTTL())
+	ttl := cfg.GetCacheTTL()
+	if ttl <= 0 {
+		ttl = time.Hour
+	}
+	c := cache.NewWithStreamTTL(ttl)
 
 	// 创建处理器
 	ph := handler.NewPlaybackHandler(c, log)
@@ -48,48 +64,131 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	// 创建反向代理
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 
-	return &Server{
+	s := &Server{
 		config:          cfg,
 		logger:          log,
 		cache:           c,
 		playbackHandler: ph,
 		streamHandler:   sh,
 		proxy:           proxy,
-	}, nil
+	}
+	if cfg.GetRole() != "proxy" || cfg.GetDeliveryMode() == "direct" {
+		media := cfg.GetMedia()
+		key, err := media.ResolveKeyBytes()
+		if err != nil {
+			c.Stop()
+			return nil, err
+		}
+		s.mediaHandler, err = handler.NewMediaHandler(sh, key, time.Duration(media.TokenTTLSeconds)*time.Second, media.PublicBaseURL, media.AllowedOrigins)
+		if err != nil {
+			c.Stop()
+			return nil, err
+		}
+		if cfg.GetDeliveryMode() == "direct" && cfg.GetRole() != "media" {
+			sh.SetDirectRelay(s.mediaHandler.IssueURL)
+		}
+	}
+	return s, nil
 }
 
 // Start 启动服务器
 func (s *Server) Start() error {
+	s.mu.Lock()
+	if s.stopping {
+		s.mu.Unlock()
+		return http.ErrServerClosed
+	}
+	if s.started {
+		s.mu.Unlock()
+		return fmt.Errorf("server already started")
+	}
 	// 设置Director
 	originalDirector := s.proxy.Director
 	s.proxy.Director = func(req *http.Request) {
 		originalDirector(req)
-		req.Host = s.config.GetTargetAddr()
+		req.Host = req.URL.Host
 		if s.isStreamAPIRequest(req) {
-			req.Header.Del("Accept-Encoding")
+			req.Header.Set("Accept-Encoding", "identity")
 		}
 	}
 
 	// 设置ModifyResponse
 	s.proxy.ModifyResponse = s.handleResponse
 
-	// 创建HTTP服务器
-	s.httpServer = &http.Server{
-		Addr:    s.config.GetListenAddr(),
-		Handler: s.loggingMiddleware(s.proxy),
+	// Bind every requested listener before serving any traffic. A failed media
+	// listener must not leave a seemingly healthy, half-started deployment.
+	type endpoint struct {
+		server    *http.Server
+		tlsConfig *tls.Config
 	}
+	var endpoints []endpoint
+	if s.config.GetRole() != "media" {
+		s.httpServer = newHTTPServer(s.config.GetListenAddr(), s.loggingMiddleware(s.proxy))
+		endpoints = append(endpoints, endpoint{server: s.httpServer})
+	}
+	if s.config.GetRole() != "proxy" {
+		media := s.config.GetMedia()
+		e := endpoint{server: newHTTPServer(media.Listen, s.mediaHandler)}
+		if media.TLSCertFile != "" {
+			cert, err := newCertificateReloader(media.TLSCertFile, media.TLSKeyFile, func(message string) { s.logger.Warn("%s", message) })
+			if err != nil {
+				s.mu.Unlock()
+				return fmt.Errorf("load media TLS certificate: %w", err)
+			}
+			e.tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: cert.GetCertificate, NextProtos: []string{"http/1.1"}}
+		}
+		endpoints = append(endpoints, e)
+	}
+	var listeners []net.Listener
+	for _, e := range endpoints {
+		ln, err := net.Listen("tcp", e.server.Addr)
+		if err != nil {
+			for _, bound := range listeners {
+				_ = bound.Close()
+			}
+			s.mu.Unlock()
+			return fmt.Errorf("listen %s: %w", e.server.Addr, err)
+		}
+		if e.tlsConfig != nil {
+			ln = tls.NewListener(ln, e.tlsConfig)
+		}
+		listeners = append(listeners, ln)
+	}
+	s.started = true
+	results := make(chan error, len(endpoints))
+	for i, e := range endpoints {
+		s.servers = append(s.servers, e.server)
+		go func(server *http.Server, ln net.Listener) { results <- server.Serve(ln) }(e.server, listeners[i])
+	}
+	s.mu.Unlock()
+	err := <-results
+	_ = s.Stop()
+	return err
+}
 
-	return s.httpServer.ListenAndServe()
+func newHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 16 << 10}
 }
 
 // Stop 停止服务器
 func (s *Server) Stop() error {
-	if s.httpServer != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return s.httpServer.Shutdown(ctx)
+	s.mu.Lock()
+	s.stopping = true
+	servers := append([]*http.Server(nil), s.servers...)
+	s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var firstErr error
+	for _, server := range servers {
+		if err := server.Shutdown(ctx); err != nil {
+			_ = server.Close()
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
 	}
-	return nil
+	s.stopCache.Do(s.cache.Stop)
+	return firstErr
 }
 
 // Reload 重新加载配置
@@ -102,6 +201,9 @@ func (s *Server) Reload() {
 // handleResponse 处理响应
 func (s *Server) handleResponse(resp *http.Response) error {
 	if s.isStreamAPIRequest(resp.Request) {
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil
+		}
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return err
@@ -109,11 +211,14 @@ func (s *Server) handleResponse(resp *http.Response) error {
 		_ = resp.Body.Close()
 		newBody, count, err := s.streamHandler.RewriteStreamAPIResponse(body)
 		if err != nil {
-			s.logger.Warn("fnOS stream API response rewrite failed: %v", err)
-			newBody = body
+			s.logger.Warn("fnOS stream API response rewrite failed")
+			// Never return the original private URL/credentials when ticket
+			// issuance fails. The reverse proxy returns a generic 502.
+			return fmt.Errorf("media response rewrite failed")
 		}
 		if count > 0 {
 			s.logger.Info("rewrote %d fnOS stream API URL(s) to relay", count)
+			resp.Header.Set("Cache-Control", "private, no-store")
 		}
 		resp.Body = io.NopCloser(bytes.NewReader(newBody))
 		resp.ContentLength = int64(len(newBody))
@@ -188,7 +293,7 @@ func contains(s, substr string) bool {
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 记录请求（debug级别）
-		s.logger.Debug("请求: %s %s", r.Method, r.URL.Path)
+		s.logger.Debug("请求: %s %s", r.Method, safeRequestPath(r))
 
 		// trace级别：记录完整请求信息（包括body）
 		if s.logger.GetLevel() <= logger.TraceLevel {
@@ -218,7 +323,7 @@ func (s *Server) logRequest(r *http.Request) []byte {
 	// 记录请求详情
 	s.logger.Trace("=== REQUEST ===")
 	s.logger.Trace("Method: %s", r.Method)
-	s.logger.Trace("URL: %s", r.URL.EscapedPath())
+	s.logger.Trace("URL: %s", safeRequestPath(r))
 	s.logger.Trace("Headers:")
 	for name, values := range r.Header {
 		if isSensitiveHeader(name) {
@@ -239,9 +344,18 @@ func (s *Server) logRequest(r *http.Request) []byte {
 
 func isSensitiveHeader(name string) bool {
 	switch strings.ToLower(name) {
-	case "authorization", "proxy-authorization", "cookie", "set-cookie", "x-emby-token", "x-mediabrowser-token":
+	case "authorization", "proxy-authorization", "cookie", "set-cookie", "x-emby-token", "x-mediabrowser-token", "referer", "location":
 		return true
 	default:
 		return false
 	}
+}
+
+func safeRequestPath(r *http.Request) string {
+	for _, prefix := range []string{"/fntv-relay/", "/fntv-media/"} {
+		if strings.HasPrefix(r.URL.Path, prefix) {
+			return prefix + "[REDACTED]"
+		}
+	}
+	return r.URL.EscapedPath()
 }

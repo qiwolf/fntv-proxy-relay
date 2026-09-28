@@ -1,0 +1,19 @@
+services:
+  media:
+    # 固定预发布版本，提供 amd64 / arm64；不会运行飞牛网页代理
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2-rc.1
+    # 本地构建：取消下两行注释，并将 image 改为 fntv-proxy-relay:direct-local
+    # build:
+    #   context: ../..
+    restart: unless-stopped
+    ports:
+      - "49963:49963"
+    environment:
+      CONFIG: /app/config.yaml
+    volumes:
+      - ./media.config.yaml:/app/config.yaml:ro
+      # 手动提供证书；整个目录挂载支持证书原地更新后的热加载
+      # /run/certs 是本示例约定，不是程序默认；自定义时同步修改配置路径
+      - ./certs:/run/certs:ro
+      # 宿主机文件必须为 0600，只读绑定保留 Linux 文件权限
+      - ./secrets/media_key:/run/secrets/media_key:ro

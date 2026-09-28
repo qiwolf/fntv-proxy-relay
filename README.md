@@ -23,6 +23,8 @@
 - ✅ 可选 relay 模式，支持 GET/HEAD、Range/If-Range 和 206 透传
 - ✅ relay 模式逐跳校验上游允许列表，并限制 `.strm` 可读根目录
 - ✅ 兼容飞牛影视 0.9.8 `POST /v/api/v1/stream`，将 JSON 中内网直链改写为同源临时令牌代理
+- ✅ 可选专用 HTTPS 媒体直出，保留网页代理并让视频绕过 VPS 反代
+- ✅ 播放密钥自动生成与持久化，用户自备证书支持热加载（不包含签发、续期或同步）
 - ✅ 支持日志级别配置
 - ✅ 缓存过期时间可配置
 - ✅ 优雅关闭
@@ -46,6 +48,8 @@
 
 完整的网络结构、Docker Compose、Nginx、安全限制、验收与回滚步骤见 [STRM Relay 部署指南](docs/RELAY_DEPLOYMENT.md)。
 
+如需保留 VPS 上的页面和登录、让媒体数据从另一台服务器直接返回，见 [专用媒体服务与直出部署指南](docs/DIRECT_MEDIA.md)。通过 `role`、`delivery_mode` 选择功能，旧配置默认行为不变；直出功能请使用 `0.9.8-relay.2-rc.1` 预发布标签，不要使用仍指向稳定版的 `latest`。指南提供单机双监听和分机部署的完整注释配置。
+
 ## 容器镜像
 
 GitHub Release 标签会自动构建 `linux/amd64`、`linux/arm64` 镜像并发布到 GHCR：
@@ -55,6 +59,14 @@ docker pull ghcr.io/qiwolf/fntv-proxy-relay:latest
 ```
 
 生产环境建议固定版本标签，不要长期使用 `latest`。
+
+直出预发布版（不会更新稳定版 `latest`）：
+
+```bash
+docker pull ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2-rc.1
+```
+
+媒体 HTTPS 证书由用户提供：可在 `media.tls_cert_file`、`media.tls_key_file` 指定路径，或按直出示例挂载 `certs` 目录并显式配置 `/run/certs/fullchain.pem`、`/run/certs/privkey.pem`。这些是示例路径，不是程序默认值；详见 [证书热加载](docs/DIRECT_MEDIA.md#证书热加载)。
 
 ## 配置文件
 
@@ -128,7 +140,7 @@ emby:
 ```yaml
 services:
   fntv-proxy:
-    image: jimboo7339/fntv-proxy:latest
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.1
     container_name: fntv-proxy
     ports:
       - "28005:28005"   # 飞牛影视代理
@@ -138,7 +150,7 @@ services:
       # 前后路径必须一致：宿主机是什么路径，容器内就是什么路径
       - /vol00/strm:/vol00/strm:ro
       - /vol01/strm:/vol01/strm:ro
-      # 挂载配置文件（用于热重载）
+      # 挂载配置文件（除日志配置外，修改后需重启）
       - ./config.yaml:/app/config.yaml:ro
     environment:
       - CONFIG=/app/config.yaml

@@ -1,0 +1,22 @@
+services:
+  all:
+    # 固定预发布版本，不覆盖稳定版 latest；支持 amd64 / arm64
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2-rc.1
+    # 本地构建：取消下两行注释，并将 image 改为 fntv-proxy-relay:direct-local
+    # build:
+    #   context: ../..
+    restart: unless-stopped
+    ports:
+      - "28005:28005" # 原飞牛代理入口，仅向需要访问的网络开放
+      - "49963:49963" # 公网媒体入口，防火墙 / 端口映射需单独配置
+    environment:
+      CONFIG: /app/config.yaml
+    volumes:
+      - ./all.config.yaml:/app/config.yaml:ro
+      # 飞牛上报的 STRM 绝对路径必须与容器内路径一致
+      - /media/strm:/media/strm:ro
+      # 手动准备 fullchain.pem / privkey.pem；配置填写的是容器内路径
+      # 可同时修改本挂载与配置来使用自定义目录；挂载整个目录以支持热加载
+      - ./certs:/run/certs:ro
+      # 自动生成的密钥必须持久化；不要删除此目录
+      - ./data:/app/data

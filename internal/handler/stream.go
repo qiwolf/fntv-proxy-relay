@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const maxRedirects = 10
@@ -29,6 +30,12 @@ type StreamHandler struct {
 	allowedUpstreams map[string]struct{}
 	allowedStrmRoots []string
 	publicBaseURL    string
+	directURL        func(string) (string, error)
+}
+
+// SetDirectRelay selects an external media gateway. Configure before serving.
+func (h *StreamHandler) SetDirectRelay(issue func(string) (string, error)) {
+	h.directURL = issue
 }
 
 func NewStreamHandler(c *cache.Cache, l *logger.Logger, mode string, allowedUpstreams, allowedStrmRoots []string, publicBaseURL ...string) *StreamHandler {
@@ -50,7 +57,9 @@ func NewStreamHandler(c *cache.Cache, l *logger.Logger, mode string, allowedUpst
 			h.allowedUpstreams[normalized] = struct{}{}
 		}
 	}
-	h.client = &http.Client{CheckRedirect: h.checkRedirect}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = 30 * time.Second
+	h.client = &http.Client{CheckRedirect: h.checkRedirect, Transport: transport}
 	return h
 }
 
@@ -127,6 +136,17 @@ func (h *StreamHandler) handleRelay(w http.ResponseWriter, r *http.Request, sour
 	}
 	// Resolve the .strm URL for every relay request. Final CDN URLs are often
 	// signed and short-lived, so caching them can break later Range seeks.
+	if h.directURL != nil {
+		location, err := h.directURL(strmURL)
+		if err != nil {
+			http.Error(w, "media source is not allowed", http.StatusForbidden)
+			return true
+		}
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set("Location", location)
+		w.WriteHeader(http.StatusFound)
+		return true
+	}
 	return h.relayURL(w, r, strmURL)
 }
 
@@ -172,6 +192,9 @@ func (h *StreamHandler) relayURL(w http.ResponseWriter, r *http.Request, upstrea
 // RewriteStreamAPIResponse rewrites allowlisted absolute media URLs returned
 // by fnOS 0.9.8 POST /v/api/v1/stream to same-origin relay URLs.
 func (h *StreamHandler) RewriteStreamAPIResponse(body []byte) ([]byte, int, error) {
+	if h.mode != "relay" {
+		return body, 0, nil
+	}
 	var payload any
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
 	decoder.UseNumber()
@@ -220,6 +243,15 @@ func (h *StreamHandler) rewriteJSONURLs(value *any, rewritten map[string]string)
 			return 0, nil
 		}
 		if replacement, ok := rewritten[current]; ok {
+			*value = replacement
+			return 1, nil
+		}
+		if h.directURL != nil {
+			replacement, err := h.directURL(current)
+			if err != nil {
+				return 0, err
+			}
+			rewritten[current] = replacement
 			*value = replacement
 			return 1, nil
 		}

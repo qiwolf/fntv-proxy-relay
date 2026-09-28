@@ -1,0 +1,38 @@
+# 单台飞牛主机：保留原代理，同时启用独立媒体端口
+role: all
+# direct 要求 stream_mode: relay；切回旧同源模式用 role: proxy + delivery_mode: proxy
+delivery_mode: direct
+listen: ":28005"
+# 容器内必须可达；桥接网络中的 127.0.0.1 不是宿主机
+target: "http://fntv.internal:8005"
+log_level: info
+# STRM 缓存分钟数，与下方播放票据有效期不同
+cache_ttl: 60
+stream_mode: relay
+# 精确允许回源主机与端口，重定向目标也须列出；不要写任意通配允许列表
+allowed_upstreams:
+  - "media-source.internal:5244"
+allowed_strm_roots:
+  # 必须是飞牛返回的 STRM 绝对路径，Compose 中同路径只读挂载
+  - "/media/strm"
+media:
+  listen: ":49963"
+  # 客户端直连此地址：DNS、端口映射、证书域名须匹配；不可写内网地址
+  public_base_url: "https://media.example.com:49963"
+  # 省略 token_key / token_key_file，首次启动生成 token.key（0600），目录 0700
+  # 必须持久化此目录，重建 / 升级时保留；损坏或权限不安全时拒绝启动而非覆盖
+  state_dir: "/app/data/media"
+  # 默认 3600，范围 1–86400 秒；到期后拖动 / 重连需重新取得播放地址
+  token_ttl_seconds: 3600
+  # 手动提供 PEM 完整证书链与匹配私钥，两项必须成对填写，无隐式默认路径
+  # 这里是 Compose 的容器内挂载路径；可以自定，但须同步修改目录挂载
+  # 内容有效更新后自动热加载；路径修改须重启；不负责签发、续期或同步
+  tls_cert_file: "/run/certs/fullchain.pem"
+  tls_key_file: "/run/certs/privkey.pem"
+  # 公网保持 false；true 只用于本地测试或可信 HTTPS 终止代理后方
+  allow_http: false
+  # 实际飞牛网页 Origin，含协议与非默认端口，不含路径 / 尾部斜杠
+  allowed_origins:
+    - "https://fn.example.com"
+emby:
+  enabled: false

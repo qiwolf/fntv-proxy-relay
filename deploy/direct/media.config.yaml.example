@@ -1,0 +1,27 @@
+# 分机媒体节点：仅监听媒体端口，无网页 / 登录 / Emby，不需要 STRM 挂载
+role: media
+# delivery_mode 仅控制签发端；纯媒体服务不设置该参数
+stream_mode: relay
+log_level: info
+allowed_upstreams:
+  # 必须与源站实际地址一致；每次重定向也检查，不是任意 URL 代理
+  - "media-source.internal:5244"
+media:
+  listen: ":49963"
+  # 与签发端完全一致，客户端可达，证书名称与此域名匹配
+  public_base_url: "https://media.example.com:49963"
+  # 与 proxy 端使用相同 64 位十六进制密钥，手动安全复制且权限必须 0600
+  # 不要两端各自自动生成；token_key 与 token_key_file 不能同时填写
+  token_key_file: "/run/secrets/media_key"
+  # 默认 3600，范围 1–86400 秒；到期后新请求须重新取得票据
+  token_ttl_seconds: 3600
+  # 用户提供 PEM 完整链与匹配私钥；显式指定容器内路径，无默认路径
+  # 可自定义位置，同时调整 Compose 的整个证书目录挂载；不要单独绑定文件
+  # 有效内容更新支持热加载，路径修改须重启；无自动签发、续期、同步
+  tls_cert_file: "/run/certs/fullchain.pem"
+  tls_key_file: "/run/certs/privkey.pem"
+  # 公网使用 HTTPS，保持 false；true 仅限本地测试或可信 HTTPS 终止代理后方
+  allow_http: false
+  # 飞牛网页实际 Origin，不含路径 / 尾部斜杠；不是身份鉴权的替代
+  allowed_origins:
+    - "https://fn.example.com"

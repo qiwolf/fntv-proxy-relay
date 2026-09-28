@@ -17,10 +17,6 @@ func main() {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 
-	config.Watch(func() {
-		log.Println("🔄 配置已更新")
-	})
-
 	fntvServer, err := proxy.NewServer(config.Global)
 	if err != nil {
 		log.Fatalf("创建飞牛代理服务器失败: %v", err)
@@ -35,8 +31,14 @@ func main() {
 	}
 
 	log.Printf("🚀 FNTV Proxy 启动")
-	log.Printf("   飞牛监听: %s", config.Global.GetListenAddr())
-	log.Printf("   飞牛目标: %s", config.Global.GetTargetAddr())
+	log.Printf("   服务角色: %s, 媒体路径: %s", config.Global.GetRole(), config.Global.GetDeliveryMode())
+	if config.Global.GetRole() != "media" {
+		log.Printf("   飞牛监听: %s", config.Global.GetListenAddr())
+	}
+	if config.Global.GetRole() != "proxy" {
+		log.Printf("   专用媒体监听: %s", config.Global.GetMedia().Listen)
+	}
+	config.Watch(func() { fntvServer.Reload() })
 	if config.Global.Emby.IsEnabled() {
 		log.Printf("   Emby监听: %s", config.Global.Emby.GetListenAddr())
 		log.Printf("   Emby目标: %s", config.Global.Emby.GetTargetAddr())

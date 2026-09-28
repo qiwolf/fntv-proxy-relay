@@ -1,0 +1,18 @@
+services:
+  proxy:
+    # 固定预发布版本，提供 amd64 / arm64；不监听专用媒体端口
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2-rc.1
+    # 本地构建：取消下两行注释，并将 image 改为 fntv-proxy-relay:direct-local
+    # build:
+    #   context: ../..
+    restart: unless-stopped
+    ports:
+      - "28005:28005"
+    environment:
+      CONFIG: /app/config.yaml
+    volumes:
+      - ./proxy.config.yaml:/app/config.yaml:ro
+      # 飞牛上报的 STRM 绝对路径必须与容器内路径一致
+      - /media/strm:/media/strm:ro
+      # 宿主机文件必须为 0600，只读绑定保留 Linux 文件权限
+      - ./secrets/media_key:/run/secrets/media_key:ro

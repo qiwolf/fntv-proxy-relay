@@ -4,6 +4,11 @@ log_level: "info"
 log_dir: "./logs"
 cache_ttl: 60  # 缓存过期时间（分钟），默认1小时
 
+# 兼容旧配置：proxy 只运行原代理；media 只运行专用媒体服务；all 同时运行
+role: "proxy"
+# proxy 保持现有中继；direct 返回专用媒体服务地址（必须 stream_mode: relay）
+delivery_mode: "proxy"
+
 # 播放模式：redirect 保持原有 302 行为；relay 由本服务流式回源
 stream_mode: "redirect"
 
@@ -15,9 +20,37 @@ stream_mode: "redirect"
 #   - "192.168.1.20:5244"
 #   - "media-cdn.example.com"
 
-# relay 模式必填。只允许读取这些目录内的 .strm（会解析符号链接）
+# proxy/all 的 relay 模式必填；纯 media 角色不读取 STRM，不需要此项。
+# 只允许读取这些目录内的 .strm（会解析符号链接）；容器内须保持相同绝对路径并只读挂载。
 # allowed_strm_roots:
 #   - "/vol00/strm"
+
+# direct / media 配置详见 docs/DIRECT_MEDIA.md。默认不会启动 49963。
+# media:
+#   # 省略 token_key/token_key_file/密钥环境变量时自动生成，不要同时启用下面的手动示例。
+#   # 容器把宿主机 ./data 挂载到 /app/data；必须保留该目录，升级重建不能删除。
+#   state_dir: "/app/data/media"
+#   # 仅 media/all 开启此监听，proxy 只签发地址。端口需与公网映射对应。
+#   listen: ":49963"
+#   # 客户端可访问的完整 HTTPS origin，不含路径、查询参数或末尾斜杠。
+#   public_base_url: "https://media.example.com:49963"
+#   # token_key_file: "/run/secrets/media_key" # 可选手动密钥：64 位十六进制，0600 权限
+#   # 或使用 FNTV_MEDIA_TOKEN_KEY 环境变量；不要将真实 token_key 提交到仓库
+#   # 分机 proxy/media 必须使用同一密钥，不能分别自动生成；all 单机可直接自动生成。
+#   # 1–86400 秒；0/省略默认为 3600。过期后拖动或重连须重新获取播放地址。
+#   token_ttl_seconds: 3600
+#   # 用户自行提供完整证书链和匹配私钥，两者成对配置；以下不是程序隐式默认路径。
+#   # 可改成自定义路径；容器填写容器内路径。示例挂载宿主机 ./certs:/run/certs:ro。
+#   # 程序不申请、不续期、不自动同步证书。域名必须与证书匹配，私钥限制为0600。
+#   # 挂载整个目录，不单独挂载文件；原路径替换有效证书后自动热加载，无需重启。
+#   # 修改路径需要重启；无效新证书不会替换旧有效证书。
+#   tls_cert_file: "/run/certs/fullchain.pem"
+#   tls_key_file: "/run/certs/privkey.pem"
+#   # 仅本地测试或可信 TLS 终止代理后使用 HTTP，公网不要关闭 TLS。
+#   allow_http: false
+#   # 浏览器网页入口的精确 origin，含非默认端口，不含路径；不能填通配符。
+#   allowed_origins:
+#     - "https://fn.example.com"
 
 # Emby 302 代理（默认关闭，不影响现有飞牛代理）
 emby:

@@ -28,8 +28,8 @@ COPY --from=builder /app/fntv-proxy /app/fntv-proxy
 # 复制默认配置文件（仓库内为 config.yaml.example）
 COPY --from=builder /app/config.yaml.example /app/config.yaml
 
-# 暴露端口（飞牛 28005，Emby 8095）
-EXPOSE 28005 8095
+# 声明端口不代表启用服务：49963 仅 role=media/all 时监听
+EXPOSE 28005 8095 49963
 
 # 运行
 ENTRYPOINT ["/app/fntv-proxy"]

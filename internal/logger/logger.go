@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,7 +23,7 @@ const (
 
 // Logger 日志记录器
 type Logger struct {
-	level      Level
+	level      atomic.Int32
 	logDir     string
 	consoleLog bool // 是否输出到控制台
 	fileLog    bool // 是否输出到文件
@@ -34,11 +35,11 @@ type Logger struct {
 // logDir: 日志目录，空字符串表示不写文件
 func New(level, logDir string) *Logger {
 	l := &Logger{
-		level:      parseLevel(level),
 		logDir:     logDir,
 		consoleLog: true,
 		fileLog:    logDir != "",
 	}
+	l.level.Store(int32(parseLevel(level)))
 
 	if l.fileLog {
 		if err := os.MkdirAll(logDir, 0755); err != nil {
@@ -69,17 +70,17 @@ func parseLevel(level string) Level {
 
 // SetLevel 设置日志级别
 func (l *Logger) SetLevel(level string) {
-	l.level = parseLevel(level)
+	l.level.Store(int32(parseLevel(level)))
 }
 
 // GetLevel 获取当前日志级别
 func (l *Logger) GetLevel() Level {
-	return l.level
+	return Level(l.level.Load())
 }
 
 // Trace 追踪日志（最详细，记录请求/响应完整内容）
 func (l *Logger) Trace(format string, v ...interface{}) {
-	if l.level <= TraceLevel {
+	if l.GetLevel() <= TraceLevel {
 		msg := fmt.Sprintf(format, v...)
 		l.write("TRACE", msg, l.fileLog) // trace只写文件，避免控制台刷屏
 	}
@@ -87,7 +88,7 @@ func (l *Logger) Trace(format string, v ...interface{}) {
 
 // Debug 调试日志（debug级别才输出到文件）
 func (l *Logger) Debug(format string, v ...interface{}) {
-	if l.level <= DebugLevel {
+	if l.GetLevel() <= DebugLevel {
 		msg := fmt.Sprintf(format, v...)
 		l.write("DEBUG", msg, l.fileLog) // debug写文件，不写控制台
 	}
@@ -95,7 +96,7 @@ func (l *Logger) Debug(format string, v ...interface{}) {
 
 // Info 信息日志
 func (l *Logger) Info(format string, v ...interface{}) {
-	if l.level <= InfoLevel {
+	if l.GetLevel() <= InfoLevel {
 		msg := fmt.Sprintf(format, v...)
 		l.write("INFO", msg, true)
 	}
@@ -103,7 +104,7 @@ func (l *Logger) Info(format string, v ...interface{}) {
 
 // Warn 警告日志
 func (l *Logger) Warn(format string, v ...interface{}) {
-	if l.level <= WarnLevel {
+	if l.GetLevel() <= WarnLevel {
 		msg := fmt.Sprintf(format, v...)
 		l.write("WARN", msg, true)
 	}
@@ -111,7 +112,7 @@ func (l *Logger) Warn(format string, v ...interface{}) {
 
 // Error 错误日志
 func (l *Logger) Error(format string, v ...interface{}) {
-	if l.level <= ErrorLevel {
+	if l.GetLevel() <= ErrorLevel {
 		msg := fmt.Sprintf(format, v...)
 		l.write("ERROR", msg, true)
 	}
@@ -129,7 +130,7 @@ func (l *Logger) write(level, msg string, console bool) {
 	}
 
 	// 写入文件（debug 或 trace 级别时写入）
-	if l.fileLog && (l.level == DebugLevel || l.level == TraceLevel) {
+	if level := l.GetLevel(); l.fileLog && (level == DebugLevel || level == TraceLevel) {
 		l.mutex.Lock()
 		defer l.mutex.Unlock()
 

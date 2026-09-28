@@ -1,0 +1,27 @@
+# 分机签发端：保留网页与登录，不监听专用媒体端口，不需要媒体 TLS 证书
+role: proxy
+# direct 必须配合 stream_mode: relay，默认 proxy 保留原模式
+delivery_mode: direct
+listen: ":28005"
+# 容器内必须可解析且可达；桥接网络中的 localhost 不是宿主机
+target: "http://fntv.internal:8005"
+log_level: info
+# STRM 缓存分钟数，不是票据有效期
+cache_ttl: 60
+stream_mode: relay
+# 精确限制可签发的媒体源，非标准端口必须填写；媒体节点也独立校验
+allowed_upstreams:
+  - "media-source.internal:5244"
+allowed_strm_roots:
+  # 与飞牛返回的 STRM 绝对路径一致，并在 Compose 中同路径只读挂载
+  - "/media/strm"
+media:
+  # 公网媒体节点地址，不能写代理自身页面地址；须与 media 节点配置一致
+  public_base_url: "https://media.example.com:49963"
+  # 两端使用相同 64 位十六进制密钥文件，权限 0600，容器运行用户可读
+  # 手动安全复制；本程序不自动同步，不能两端分别自动生成
+  token_key_file: "/run/secrets/media_key"
+  # 默认 3600，范围 1–86400 秒；覆盖预期播放 / 拖动时长
+  token_ttl_seconds: 3600
+emby:
+  enabled: false
