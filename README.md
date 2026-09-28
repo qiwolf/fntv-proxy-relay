@@ -1,17 +1,80 @@
 # FNTV Proxy Relay
 
-## 部署模式与直出预发布版
+## 部署模式详细说明
 
-| 模式 | 本项目容器数 | 视频流量路径 |
+> 直出功能请使用固定镜像 `0.9.8-relay.2-rc.1`；默认分支代码和 `latest` 镜像仍为稳定版。本节是该预发布版的补充文档。
+
+
+本项目的“主服务”是飞牛影视代理，不替代飞牛影视本体；“媒体服务”负责鉴权回源和传输视频，不管理媒体库或转码。
+
+| 模式 | 本项目容器数量 | 视频路径 | 配置入口 |
+| --- | --- | --- | --- |
+| 原有 302 | 1 | 客户端访问源站，要求源站对客户端可达 | `stream_mode: redirect` |
+| 同源中继 | 1 | 视频经过原网页入口；入口在 VPS 时仍占 VPS 带宽 | `stream_mode: relay`，见 [中继指南](https://github.com/qiwolf/fntv-proxy-relay/blob/d299c5f68688d0beb5734c7630dc705fa1ed98bd/docs/RELAY_DEPLOYMENT.md) |
+| 单容器直出 | 1，双监听 | 网页走原入口，视频走独立媒体端口 | `role: all`，见 [直出指南](https://github.com/qiwolf/fntv-proxy-relay/blob/d299c5f68688d0beb5734c7630dc705fa1ed98bd/docs/DIRECT_MEDIA.md) |
+| 双容器分机直出 | 2，同一镜像 | NAS 主代理签发地址，机房媒体服务直接向客户端传输 | `role: proxy` + `role: media`，见 [直出指南](https://github.com/qiwolf/fntv-proxy-relay/blob/d299c5f68688d0beb5734c7630dc705fa1ed98bd/docs/DIRECT_MEDIA.md) |
+
+直出使用固定镜像标签 `0.9.8-relay.2-rc.1`，不要使用仍指向稳定版的 `latest`。分机模式必须在媒体主机实际部署服务，并配置相同播放密钥；只在主代理填写媒体域名不会自动部署远端服务。客户端无需配置密钥。单容器与双容器方案二选一，容器数量不含飞牛影视本体和已有反代。
+
+### 1. 原有 302：让客户端自己访问媒体源
+
+适合 STRM 内的 URL 本来就能被播放器访问的情况。代理在支持的旧播放路径中解析地址并返回重定向，视频由源站传给客户端，代理不负责转发视频正文。飞牛 0.9.8 原生 stream API 在 redirect 模式下保留原响应，不保证每个接口都会产生 302。
+
+如果 STRM 指向只有 NAS 能访问的内网地址，公网客户端仍然打不开；此模式不是内网穿透，也不会自动回退为服务器代理。
+
+配置组合为 `role: proxy`、`delivery_mode: proxy`、`stream_mode: redirect`，只运行主代理，不启动专用媒体监听。使用[基础配置](https://github.com/qiwolf/fntv-proxy-relay/blob/d299c5f68688d0beb5734c7630dc705fa1ed98bd/config.yaml.example)，媒体源本身的访问条件由用户负责。
+
+### 2. 同源中继：一个入口，服务器代客户端取流
+
+适合“客户端不能访问内网源站，也无法提供独立公网媒体入口”的情况。主代理把受支持的播放地址改为原域名下的 `/fntv-relay/…`，由主代理读取源站并转发视频。
+
+典型视频返回路径是：`内网源站 → 主代理 → VPS 网页反代 → 客户端`。客户端只访问原入口，部署较简单，但如果入口在 VPS，视频必然占用该 VPS 的带宽；Range/206 支持不会改变这一点。若入口没有 VPS，则不额外经过 VPS。
+
+配置组合为 `role: proxy`、`delivery_mode: proxy`、`stream_mode: relay`。配置 `allowed_upstreams` 和 `allowed_strm_roots`，将既有 STRM 目录只读挂入主代理。完整步骤见[同源中继部署指南](https://github.com/qiwolf/fntv-proxy-relay/blob/d299c5f68688d0beb5734c7630dc705fa1ed98bd/docs/RELAY_DEPLOYMENT.md)。
+
+### 3. 单容器直出：一个容器，网页和媒体分两个入口
+
+适合一台主机同时运行主代理与媒体服务，并能提供公网媒体端口的情况。同一个容器启动两个监听：例如 `28005` 接收原网页反代，`49963` 接收客户端媒体请求；端口可配置。
+
+网页与登录仍通过原入口。主代理签发短期播放地址，客户端随后访问媒体域名：`源站 → 本容器媒体监听 → 客户端`。媒体域名必须指向媒体服务的实际公网入口，不能再指回原 VPS 视频反代，否则仍占 VPS 带宽。
+
+配置组合为 `role: all`、`delivery_mode: direct`、`stream_mode: relay`。使用 [`all.config.yaml.example`](https://github.com/qiwolf/fntv-proxy-relay/blob/d299c5f68688d0beb5734c7630dc705fa1ed98bd/deploy/direct/all.config.yaml.example) 和 [`compose.all.yaml`](https://github.com/qiwolf/fntv-proxy-relay/blob/d299c5f68688d0beb5734c7630dc705fa1ed98bd/deploy/direct/compose.all.yaml)，不要同时再启动一套占用相同端口的主代理。这里是一个容器，不是两个镜像。
+
+省略手动播放密钥时程序自动生成，必须持久化 `media.state_dir`。用户提供媒体域名的证书链及私钥；按示例挂载整个证书目录，或者自行指定容器内证书路径。只支持证书热加载，不负责签发、续期或同步。STRM 目录仍需只读挂载。
+
+### 4. 分机直出：主代理签发地址，独立媒体容器负责传输
+
+适合主代理留在 A 地 NAS，而希望 B 地服务器承担视频传输的情况。两端运行**同一个镜像、不同角色**，合计两个容器；无需在 B 地再安装飞牛影视或复制媒体库。
+
+| 配置或资源 | A 地主代理 | B 地媒体服务 |
 | --- | --- | --- |
-| 原有 302 | 1 | 客户端直接访问源站，要求源站可达 |
-| 同源 relay | 1 | 视频经过原网页入口；入口在 VPS 时仍占 VPS 带宽 |
-| 单容器直出 | 1，双监听 | 同一容器的独立媒体端口直接传输 |
-| 双容器分机直出 | 2，同一镜像 | NAS 主代理签发地址，机房媒体服务传输视频 |
+| 角色 | `role: proxy` | `role: media` |
+| 地址签发 | `delivery_mode: direct` | 不设置 `delivery_mode`，保留默认 |
+| 流模式 | `stream_mode: relay` | `stream_mode: relay` |
+| 连接目标 | 飞牛影视本体 | STRM 中的实际媒体源 URL |
+| 端口示例 | 28005，供原反代访问 | 49963，供客户端直接访问 |
+| STRM 目录 | 只读挂载，并配置允许根目录 | 不需要挂载 |
+| 播放密钥 | 签发票据 | 必须与主代理使用同一个密钥 |
+| 媒体证书 | 无需加载远端媒体证书 | 配置证书链和私钥路径 |
+| 配置示例 | [proxy 配置](https://github.com/qiwolf/fntv-proxy-relay/blob/d299c5f68688d0beb5734c7630dc705fa1ed98bd/deploy/direct/proxy.config.yaml.example) / [Compose](https://github.com/qiwolf/fntv-proxy-relay/blob/d299c5f68688d0beb5734c7630dc705fa1ed98bd/deploy/direct/compose.proxy.yaml) | [media 配置](https://github.com/qiwolf/fntv-proxy-relay/blob/d299c5f68688d0beb5734c7630dc705fa1ed98bd/deploy/direct/media.config.yaml.example) / [Compose](https://github.com/qiwolf/fntv-proxy-relay/blob/d299c5f68688d0beb5734c7630dc705fa1ed98bd/deploy/direct/compose.media.yaml) |
 
-后两种模式使用预发布镜像 `ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2-rc.1`；`main` 代码与 `latest` 镜像仍为稳定版。请阅读[完整模式选择及分机配置指南](https://github.com/qiwolf/fntv-proxy-relay/blob/fbc249059165499bbe1caff04720d87217cd180d/docs/DIRECT_MEDIA.md)，并使用指南链接的配套配置。
+主代理将 `media.public_base_url` 设置为 B 地公网媒体入口。两端配置精确的上游允许列表，并安全共享同一密钥；不能让两端各自随机生成后直接配对。公网 DNS、防火墙和端口映射必须让客户端实际到达 B 地媒体容器。只在主代理填一个域名不会部署远端服务。
 
-主代理不是飞牛影视本体，媒体服务不负责媒体库或转码。分机部署需要实际运行远端媒体容器、配置相同播放密钥及可达的公网媒体入口；只填写域名不会自动部署。单容器与双容器方案二选一，客户端无需填写密钥。媒体证书由用户提供，支持热加载，不包含自动签发、续期或同步。
+视频返回路径是 `源站 → B 地媒体容器 → 客户端`，A 地主代理和原网页 VPS 不传输这些视频正文。前提是 B 地容器能访问 STRM 里原本的 URL；本项目不会自动转换另一处网络的私有地址。若 B 地容器实际放在家中，再经隧道连接机房，家庭线路和隧道仍会承载视频，不能把它理解为“媒体直接从机房源站出网”。
+
+### 如何选择，以及不包含什么
+
+- 客户端能访问源站：可用原有 302。
+- 客户端不能访问源站，且没有独立公网媒体入口：用同源中继，接受原入口承担视频带宽。
+- 有独立媒体入口，主代理和媒体服务在同一主机：用单容器直出。
+- 希望另一台主机承担媒体出口：用分机直出。
+
+直出模式下客户端仍登录原飞牛入口，不需要配置服务器密钥；但客户端必须信任媒体 HTTPS 证书并能访问媒体端口。票据过期后拖动或重连可能需要重新获取播放地址，媒体入口故障不会自动回退到 VPS。
+
+当前直出仅针对可处理的直接媒体文件 URL，不保证转码、本地媒体或 HLS/DASH 分片都绕过原入口。**Emby 仍是独立的原有代理逻辑，尚未接入这套媒体票据直出**，不能直接套用本表配置实现 Emby 分机直出。
+
+本说明适用于 `0.9.8-relay.2-rc.1` 镜像。GitHub 的版本标签页面是发布时的固定源码快照，不随文档分支更新；文档补充见[当前仓库首页](https://github.com/qiwolf/fntv-proxy-relay)与 [Release 页面](https://github.com/qiwolf/fntv-proxy-relay/releases/tag/v0.9.8-relay.2-rc.1)。完整启动命令、密钥权限、证书路径、验收与回滚见[部署指南](https://github.com/qiwolf/fntv-proxy-relay/blob/d299c5f68688d0beb5734c7630dc705fa1ed98bd/docs/DIRECT_MEDIA.md)。
+
 
 飞牛影视 / Emby 代理工具——自动解析 `.strm` 文件，可选 302 重定向或服务端流式回源。
 
