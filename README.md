@@ -1,8 +1,23 @@
 # FNTV Proxy Relay
 
-为 **飞牛影视、Emby、Jellyfin** 提供 STRM 播放代理。支持源站重定向、飞牛同源中继，以及把视频传输放到另一台服务器的媒体直出。支持三服务统一入口：一个主代理容器处理三种协议，一个机房媒体容器共用媒体端口，各服务保留独立密钥和访问限制。`v0.9.8-relay.3` 修复 Emby/Jellyfin 浏览器播放信息压缩导致的 502，包含普通文件场景。
+为 **飞牛影视、Emby、Jellyfin** 提供 STRM 播放代理。支持源站重定向、飞牛同源中继，以及把视频传输放到另一台服务器的媒体直出。支持三服务统一入口：一个主代理容器处理三种协议，一个机房媒体容器共用媒体端口，各服务保留独立密钥和访问限制。
+
+**当前正式版：v0.9.8-relay.5。** 提供 Web 管理界面，支持部署向导、单管理员、配置保存与应用、共享密钥和视频证书管理。管理页直接使用 HTTP，不需要域名、证书或反代。
 
 > 本项目派生自 [jimboo7339/fntv-proxy](https://github.com/jimboo7339/fntv-proxy)。上游未提供明确 LICENSE；公开源码或容器不等于授予再分发或商业使用许可。详见 [NOTICE.md](NOTICE.md)。
+
+## 快速启动 Web 管理
+
+下载 [管理容器 Compose 示例](compose.manager.yaml.example)，在该文件所在目录执行：
+
+```sh
+docker compose -f compose.manager.yaml.example pull
+docker compose -f compose.manager.yaml.example up -d
+```
+
+打开 **`http://服务器IP:18764`**，首次访问设置唯一管理员账号和密码，然后按向导选择播放模式。管理程序默认监听 `0.0.0.0:18764`，示例已配置 `18764:18764` 端口映射；没有 Host 白名单，也不必填写 `-public-url`。
+
+管理页面能打开不等于视频服务已配置完成：按实际需要在 Compose 中发布业务端口、挂载 STRM 目录，再在页面保存并应用。管理端口仅向可信网络开放，数据卷需持久保存。详见 [Web 管理使用说明](docs/WEBUI.md)。现有容器不会自动启用管理入口或迁移配置，首次部署请避免与旧服务端口冲突。
 
 ## 选择模式
 
@@ -20,22 +35,23 @@
 
 飞牛 0.9.8 原生 `/v/api/v1/stream` 在 redirect 模式下保留原响应，不能保证每个播放接口都产生 302。同源中继是飞牛功能，不能把其顶层开关当作 Emby/Jellyfin 的同源中继开关。
 
-## 镜像与两套配置入口
+## 镜像与启动入口
 
 正式版镜像：`ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.5`，发布构建面向 `linux/amd64`、`linux/arm64`。生产建议固定版本，而非依赖可变的 `latest`。
 
 Web 管理入口 `/app/fntv-manager` 支持配置向导、单管理员、密钥与证书管理、保存和应用。默认通过 `http://服务器IP:18764` 访问，无需 HTTPS 或 Host 白名单；原有两套运行入口保持兼容。参见 [本版发布说明](docs/RELEASE-RELAY-5.md)。
 
 ```sh
-docker pull ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.3
+docker pull ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.5
 ```
 
-**同一镜像内有两个程序，配置格式不能混用：**
+**同一镜像包含管理程序及两种代理运行程序，配置格式不能混用：**
 
 默认程序的字段、默认值、单位与三端作用范围见 [配置参数详解](docs/CONFIGURATION.md)。
 
 | 程序 | 如何启动 | 配置 |
 | --- | --- | --- |
+| `/app/fntv-manager` | 使用上方管理 Compose 示例，显式设置管理入口 | 在 Web 界面配置；管理数据卷持久保存，程序启动本容器内的代理进程 |
 | `/app/fntv-proxy` | 镜像默认入口，保留旧部署 | [config.yaml.example](config.yaml.example)，顶层飞牛配置，可选 `emby` / `jellyfin` |
 | `/app/fntv-unified` | Compose 设置 `entrypoint: ["/app/fntv-unified"]` | [deploy/unified](deploy/unified)，`role` + `services`，每个服务独立配置 |
 
@@ -76,4 +92,4 @@ docker pull ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.3
 
 播放失败依次检查：是否连接主代理而非媒体端口；条目是否真正为 STRM；是否转码；挂载和允许列表；媒体证书、映射及网页 Origin。不要通过禁用证书校验或放开所有源站排错。旧 302 逻辑及调试日志可能含源站 URL，不承诺所有历史日志均脱敏；限制日志访问并在提交问题前去掉登录令牌、源站密码和完整签名 URL。
 
-版本变更见 [v0.9.8-relay.3 发布说明](docs/RELEASE_NOTES_v0.9.8-relay.3.md)。旧 `v0.9.8-relay.2-rc.1` 不包含 Emby/Jellyfin 直出及统一程序。Git 标签是固定快照，请使用与镜像对应的标签文档，不要把主分支新配置直接用于旧镜像。
+版本变更见 [v0.9.8-relay.5 发布说明](docs/RELEASE-RELAY-5.md)，Web 管理功能见 [relay.4 发布说明](docs/RELEASE-WEBUI.md)。旧 `v0.9.8-relay.2-rc.1` 不包含 Emby/Jellyfin 直出及统一程序。Git 标签是固定快照，请使用与镜像对应的标签文档，不要把主分支新配置直接用于旧镜像。
