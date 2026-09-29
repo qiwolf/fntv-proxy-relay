@@ -1,7 +1,7 @@
 services:
   proxy:
-    # 固定预发布版本，提供 amd64 / arm64；不监听专用媒体端口
-    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2-rc.1
+    # 固定正式版本，提供 amd64 / arm64；不监听专用媒体端口
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
     # 本地构建：取消下两行注释，并将 image 改为 fntv-proxy-relay:direct-local
     # build:
     #   context: ../..

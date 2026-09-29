@@ -1,0 +1,35 @@
+# 机房统一媒体服务，不运行登录代理，不需要挂载 STRM。
+# 使用 /app/fntv-unified；与 proxy 两端 services 标识、type、对应密钥和媒体地址一致。
+# 只开放该媒体端口；客户端登录仍连接主代理。NAT 应指向本机，而非 NAS。
+role: media
+listen: "0.0.0.0:49967"
+allow_http: false
+media_public_base_url: "https://media.example.com:49967"
+# 整个证书目录只读挂载。支持热加载，不包含签发、续期或同步。
+# 必须用户提供完整链和匹配私钥，私钥限制 0600，容器内路径可自定义。
+# 域名须匹配证书；替换有效内容无需重启，修改路径需重启；无效更新保留旧证书。
+tls_cert_file: /app/certs/fullchain.pem
+tls_key_file: /app/certs/privkey.pem
+services:
+  fntv:
+    type: fntv
+    # 与主代理 fntv 同一文件内容，权限 0600；不能与其他服务共用。
+    token_key_file: /run/secrets/fntv.key
+    token_ttl_seconds: 3600 # 0/省略默认 3600，范围 1–86400 秒
+    allowed_upstreams: ["media-source.internal:5244"]
+    # 浏览器跨域白名单，填写实际协议、主机和端口，不包含路径。
+    # 192.0.2.10 是文档示例，必须替换成真实 NAS 地址；只允许本服务实际入口。
+    # 不使用浏览器可省略；此白名单不是票据鉴权的替代，不能填 *。
+    allowed_origins: ["https://fntv.example.com", "http://192.0.2.10:28015"]
+  emby:
+    type: emby
+    token_key_file: /run/secrets/emby.key
+    token_ttl_seconds: 3600
+    allowed_upstreams: ["media-source.internal:5244"]
+    allowed_origins: ["https://emby.example.com", "http://192.0.2.10:18197"]
+  jellyfin:
+    type: jellyfin
+    token_key_file: /run/secrets/jellyfin.key
+    token_ttl_seconds: 3600
+    allowed_upstreams: ["media-source.internal:5244"]
+    allowed_origins: ["https://jellyfin.example.com", "http://192.0.2.10:18196"]

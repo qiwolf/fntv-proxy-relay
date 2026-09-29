@@ -273,6 +273,11 @@ func (h *StreamHandler) rewriteJSONURLs(value *any, rewritten map[string]string)
 	}
 }
 
+// ReadAllowedStrm applies the same root and symlink restrictions to other issuers.
+func (h *StreamHandler) ReadAllowedStrm(path string) (string, error) {
+	return h.readStrm(path, true)
+}
+
 func (h *StreamHandler) readStrm(path string, enforceRoots bool) (string, error) {
 	if enforceRoots {
 		allowed, err := pathWithinRoots(path, h.allowedStrmRoots)

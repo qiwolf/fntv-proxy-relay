@@ -52,13 +52,29 @@ stream_mode: "redirect"
 #   allowed_origins:
 #     - "https://fn.example.com"
 
-# Emby 302 代理（默认关闭，不影响现有飞牛代理）
+# 此文件由默认 /app/fntv-proxy 读取；统一入口请使用 deploy/unified 的独立格式。
+# Emby 与 Jellyfin 开关、监听和 delivery_mode 各自独立，不受顶层 delivery_mode 控制。
+# direct 共用顶层 media、allowed_upstreams、allowed_strm_roots；需独立密钥请用统一模式。
+# direct 仅转移可直传 STRM/远程源；实文件和转码仍由原服务器传输。
+# 客户端连接下方代理监听，不要连接 media.public_base_url。
 emby:
   enabled: false
+  delivery_mode: redirect # 默认 redirect 源站 302；direct 签发媒体票据
   listen: ":8095"
   target: "http://127.0.0.1:8096"
   cache_ttl: 60
   proxy_error_strategy: "origin"  # origin: 失败回源 | reject: 返回错误
+  # direct 授权/签发失败不会回退到原始源站 URL，此策略不能放宽 direct 安全检查。
   # strm 内 URL 路径映射（可选）
   # strm_path_map:
   #   - "https://old-host:8094 => http://localhost:8095"
+
+jellyfin:
+  enabled: false
+  delivery_mode: redirect
+  listen: ":8098" # 不得与 Emby、飞牛代理或源服务器端口冲突
+  target: "http://127.0.0.1:8096" # 按实际 Jellyfin 地址修改
+  cache_ttl: 60 # 分钟，省略/0 使用顶层 cache_ttl
+  proxy_error_strategy: origin
+  # strm_path_map:
+  #   - "http://old-source:5244 => http://media-source.internal:5244"

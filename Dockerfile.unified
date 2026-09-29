@@ -1,0 +1,14 @@
+# 可选的 unified-only 源码构建；正式发布镜像的默认 Dockerfile 已包含两个入口。
+FROM golang:1.24-alpine AS builder
+WORKDIR /src
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/fntv-unified ./cmd/unified
+
+FROM alpine:3.22
+RUN apk add --no-cache ca-certificates tzdata
+ENV TZ=Asia/Shanghai
+WORKDIR /app
+COPY --from=builder /out/fntv-unified /app/fntv-unified
+# 声明端口不等于启用监听；以挂载配置为准。
+EXPOSE 28008 28015 18197 18196 49967
+ENTRYPOINT ["/app/fntv-unified"]

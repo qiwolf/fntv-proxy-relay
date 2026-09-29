@@ -8,12 +8,14 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
 
 // MediaConfig describes the independent, authenticated media endpoint.
 type MediaConfig struct {
+	TenantID        string   `mapstructure:"tenant_id"`
 	Listen          string   `mapstructure:"listen"`
 	PublicBaseURL   string   `mapstructure:"public_base_url"`
 	TokenKey        string   `mapstructure:"token_key"`
@@ -186,16 +188,23 @@ func (c *Config) validateMedia() error {
 	if role == "media" && c.Emby.Enabled {
 		return fmt.Errorf("emby cannot be enabled with role media")
 	}
+	if role == "media" && c.Jellyfin.Enabled {
+		return fmt.Errorf("jellyfin cannot be enabled with role media")
+	}
 	if role == "all" && c.GetStreamMode() != "relay" {
 		return fmt.Errorf("role all requires stream_mode relay")
 	}
 	if delivery == "direct" && (role == "media" || c.GetStreamMode() != "relay") {
 		return fmt.Errorf("direct delivery requires role proxy/all and stream_mode relay")
 	}
-	if role == "proxy" && delivery == "proxy" {
+	embyDirect := (c.Emby.Enabled && c.Emby.GetDeliveryMode() == "direct") || (c.Jellyfin.Enabled && c.Jellyfin.GetDeliveryMode() == "direct")
+	if role == "proxy" && delivery == "proxy" && !embyDirect {
 		return nil
 	}
 	m := c.GetMedia()
+	if m.TenantID != "" && !regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`).MatchString(m.TenantID) {
+		return fmt.Errorf("media.tenant_id must be 1-32 lowercase letters, digits or hyphens, beginning with a letter")
+	}
 	if m.TokenKey != "" || m.TokenKeyFile != "" {
 		if _, err := m.KeyBytes(); err != nil {
 			return err
@@ -207,7 +216,7 @@ func (c *Config) validateMedia() error {
 	if len(c.AllowedUpstreams) == 0 {
 		return fmt.Errorf("allowed_upstreams is required for media delivery")
 	}
-	if delivery == "direct" {
+	if delivery == "direct" || embyDirect {
 		if err := validateOrigin(strings.TrimSpace(c.Media.PublicBaseURL), m.AllowHTTP); err != nil {
 			return fmt.Errorf("media.public_base_url: %w", err)
 		}

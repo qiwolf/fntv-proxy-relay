@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -22,12 +23,13 @@ const maxMediaTicketTTL = 24 * time.Hour
 // access until expiry, including repeated Range requests required for seeking.
 // All instances sharing a key must be trusted to issue tickets.
 type MediaHandler struct {
-	stream  *StreamHandler
-	aead    cipher.AEAD
-	ttl     time.Duration
-	baseURL string
-	origins map[string]bool
-	now     func() time.Time
+	stream     *StreamHandler
+	aead       cipher.AEAD
+	ttl        time.Duration
+	baseURL    string
+	pathPrefix string
+	origins    map[string]bool
+	now        func() time.Time
 }
 
 type mediaTicket struct {
@@ -37,6 +39,19 @@ type mediaTicket struct {
 }
 
 func NewMediaHandler(h *StreamHandler, key []byte, ttl time.Duration, publicBaseURL string, allowedOrigins []string) (*MediaHandler, error) {
+	return NewScopedMediaHandler(h, key, ttl, publicBaseURL, allowedOrigins, "")
+}
+
+// NewScopedMediaHandler isolates tickets cryptographically and by URL namespace.
+// An empty tenantID preserves the legacy URL and authenticated-data format.
+func NewScopedMediaHandler(h *StreamHandler, key []byte, ttl time.Duration, publicBaseURL string, allowedOrigins []string, tenantID string) (*MediaHandler, error) {
+	if tenantID != "" && !regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`).MatchString(tenantID) {
+		return nil, errors.New("invalid media tenant ID")
+	}
+	prefix := mediaPathPrefix
+	if tenantID != "" {
+		prefix += tenantID + "/"
+	}
 	if h == nil || h.mode != "relay" || len(key) != 32 || ttl < time.Second || ttl > maxMediaTicketTTL {
 		return nil, errors.New("media gateway requires relay handler, 32-byte key and ticket TTL between 1 second and 24 hours")
 	}
@@ -55,7 +70,7 @@ func NewMediaHandler(h *StreamHandler, key []byte, ttl time.Duration, publicBase
 	if err != nil {
 		return nil, err
 	}
-	m := &MediaHandler{stream: h, aead: aead, ttl: ttl, baseURL: base, origins: map[string]bool{}, now: time.Now}
+	m := &MediaHandler{stream: h, aead: aead, ttl: ttl, baseURL: base, pathPrefix: prefix, origins: map[string]bool{}, now: time.Now}
 	for _, origin := range allowedOrigins {
 		u, err := url.Parse(origin)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || strings.Contains(origin, "*") {
@@ -65,6 +80,9 @@ func NewMediaHandler(h *StreamHandler, key []byte, ttl time.Duration, publicBase
 	}
 	return m, nil
 }
+
+// PathPrefix is the exact prefix this handler issues and accepts.
+func (m *MediaHandler) PathPrefix() string { return m.pathPrefix }
 
 func (m *MediaHandler) IssueURL(upstream string) (string, error) {
 	u, err := url.Parse(upstream)
@@ -80,20 +98,20 @@ func (m *MediaHandler) IssueURL(upstream string) (string, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return "", err
 	}
-	sealed := m.aead.Seal(nonce, nonce, payload, []byte(mediaPathPrefix+"v1"))
+	sealed := m.aead.Seal(nonce, nonce, payload, []byte(m.pathPrefix+"v1"))
 	token := base64.RawURLEncoding.EncodeToString(sealed)
 	if len(token) > maxMediaTokenBytes {
 		return "", errors.New("media ticket exceeds size limit")
 	}
-	return m.baseURL + mediaPathPrefix + token, nil
+	return m.baseURL + m.pathPrefix + token, nil
 }
 
 func (m *MediaHandler) ticket(r *http.Request) (mediaTicket, bool) {
 	var t mediaTicket
-	if !strings.HasPrefix(r.URL.Path, mediaPathPrefix) || r.URL.RawQuery != "" {
+	if !strings.HasPrefix(r.URL.Path, m.pathPrefix) || r.URL.RawQuery != "" || r.URL.ForceQuery || r.URL.RawPath != "" {
 		return t, false
 	}
-	token := strings.TrimPrefix(r.URL.Path, mediaPathPrefix)
+	token := strings.TrimPrefix(r.URL.Path, m.pathPrefix)
 	if len(token) == 0 || len(token) > maxMediaTokenBytes {
 		return t, false
 	}
@@ -101,7 +119,7 @@ func (m *MediaHandler) ticket(r *http.Request) (mediaTicket, bool) {
 	if err != nil || len(sealed) < m.aead.NonceSize()+m.aead.Overhead() {
 		return t, false
 	}
-	payload, err := m.aead.Open(nil, sealed[:m.aead.NonceSize()], sealed[m.aead.NonceSize():], []byte(mediaPathPrefix+"v1"))
+	payload, err := m.aead.Open(nil, sealed[:m.aead.NonceSize()], sealed[m.aead.NonceSize():], []byte(m.pathPrefix+"v1"))
 	if err != nil || json.Unmarshal(payload, &t) != nil {
 		return t, false
 	}
@@ -120,10 +138,12 @@ func (m *MediaHandler) ticket(r *http.Request) (mediaTicket, bool) {
 func (m *MediaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	t, ok := m.ticket(r)
 	if !ok {
+		m.stream.logger.Warn("media request rejected: invalid ticket (query_present=%t)", r.URL.RawQuery != "")
 		panic(http.ErrAbortHandler)
 	}
 	origin := r.Header.Get("Origin")
 	if origin != "" && !m.origins[origin] {
+		m.stream.logger.Warn("media request rejected: origin not allowed")
 		panic(http.ErrAbortHandler)
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
@@ -154,6 +174,10 @@ func (m *MediaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Headers", "Range, If-Range, If-None-Match, If-Modified-Since")
 		w.WriteHeader(http.StatusNoContent)
 		return
+	}
+	if m.pathPrefix != mediaPathPrefix {
+		tenant := strings.TrimSuffix(strings.TrimPrefix(m.pathPrefix, mediaPathPrefix), "/")
+		m.stream.logger.Info("media request accepted: tenant=%s method=%s ranged=%t", tenant, r.Method, r.Header.Get("Range") != "")
 	}
 	m.stream.relayURL(mediaNoStoreWriter{w}, r, t.URL)
 }

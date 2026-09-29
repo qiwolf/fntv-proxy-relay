@@ -19,6 +19,7 @@ type StreamHandler struct {
 	emby      *config.EmbyConfig
 	targetURL *url.URL
 	client    *http.Client
+	direct    *directIssuer
 }
 
 // NewStreamHandler 创建流处理器
@@ -38,6 +39,9 @@ func NewStreamHandler(c *cache.Cache, l *logger.Logger, emby *config.EmbyConfig,
 
 // Handle 拦截 stream/universal 请求并 302 到真实直链
 func (h *StreamHandler) Handle(w http.ResponseWriter, r *http.Request) bool {
+	if h.emby.GetDeliveryMode() == "direct" {
+		return h.handleDirect(w, r)
+	}
 	if !isStreamRequest(r) {
 		return false
 	}

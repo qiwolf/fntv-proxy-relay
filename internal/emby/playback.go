@@ -19,6 +19,7 @@ type PlaybackHandler struct {
 	cache  *cache.Cache
 	logger *logger.Logger
 	emby   *config.EmbyConfig
+	direct *directIssuer
 }
 
 // NewPlaybackHandler 创建 PlaybackInfo 处理器
@@ -33,6 +34,9 @@ type playbackInfoResp struct {
 
 // Handle 改写 PlaybackInfo 响应并缓存 MediaSource
 func (h *PlaybackHandler) Handle(resp *http.Response, body []byte) ([]byte, bool, error) {
+	if h.emby.GetDeliveryMode() == "direct" {
+		return h.handleDirect(resp, body)
+	}
 	h.logger.Info("🎯 [Emby] 拦截 PlaybackInfo")
 
 	displayBody := body

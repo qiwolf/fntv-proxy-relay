@@ -1,0 +1,17 @@
+services:
+  jellyfin-direct-proxy:
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
+    # 可选源码构建；启用时将 image 改成本地标签。
+    # build:
+    #   context: ../..
+    restart: unless-stopped
+    # Linux NAS 专用；实际监听地址由 config.yaml 限定。
+    network_mode: host
+    environment:
+      CONFIG: /app/config.yaml
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      # 左侧改成实际 STRM 宿主机目录；右侧必须匹配 Jellyfin 返回的路径。
+      - /replace/with/host/strm:/mnt/strm:ro
+      # 提前创建真实密钥文件，权限 0600；与独立机房媒体节点保持一致。
+      - ./secrets/media_key:/run/secrets/media_key:ro

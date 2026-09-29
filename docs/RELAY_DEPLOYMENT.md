@@ -59,7 +59,7 @@ emby:
 ```yaml
 services:
   fntv-proxy-relay:
-    image: ghcr.io/qiwolf/fntv-proxy-relay:latest
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
     container_name: fntv-proxy-relay
     network_mode: host
     volumes:
@@ -126,10 +126,10 @@ docker compose logs --tail=200 fntv-proxy-relay
 
 ## 6. 升级与回滚
 
-生产环境不要长期只使用浮动的 `latest`，应固定版本标签，例如 `0.9.8-relay.1`。
+生产环境不要长期只使用浮动的 `latest`，应固定版本标签，例如 `0.9.8-relay.2`。
 
 ```bash
-docker pull ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.1
+docker pull ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
 docker compose up -d
 ```
 

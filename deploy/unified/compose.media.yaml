@@ -1,0 +1,21 @@
+services:
+  unified-media:
+    # 与主代理使用同一正式镜像和相同的统一程序入口。
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
+    entrypoint: ["/app/fntv-unified"]
+    # 可选源码构建：取消注释，并把 image 改成自定义本地标签。
+    # build:
+    #   context: ../..
+    container_name: fntv-unified-media
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      CONFIG: /app/configs/unified.yaml
+      TZ: Asia/Shanghai
+    volumes:
+      - ./config.yaml:/app/configs/unified.yaml:ro
+      # 安全复制主代理的三个对应密钥，不要在两端分别随机生成。
+      - ./secrets:/run/secrets:ro
+      # 挂载目录而非单个文件，使原子替换后的证书能被热加载。
+      - ./certs:/app/certs:ro
+      - ./logs:/app/logs

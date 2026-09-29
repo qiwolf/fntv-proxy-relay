@@ -29,6 +29,13 @@ func main() {
 			log.Fatalf("创建 Emby 代理服务器失败: %v", err)
 		}
 	}
+	var jellyfinServer *emby.Server
+	if config.Global.Jellyfin.IsEnabled() {
+		jellyfinServer, err = emby.NewJellyfinServer(config.Global)
+		if err != nil {
+			log.Fatalf("创建 Jellyfin 代理服务器失败: %v", err)
+		}
+	}
 
 	log.Printf("🚀 FNTV Proxy 启动")
 	log.Printf("   服务角色: %s, 媒体路径: %s", config.Global.GetRole(), config.Global.GetDeliveryMode())
@@ -44,6 +51,10 @@ func main() {
 		log.Printf("   Emby目标: %s", config.Global.Emby.GetTargetAddr())
 	}
 	log.Printf("   日志级别: %s", config.Global.GetLogLevel())
+	if jellyfinServer != nil {
+		log.Printf("   Jellyfin监听: %s", config.Global.Jellyfin.GetListenAddr())
+		log.Printf("   Jellyfin目标: %s", config.Global.Jellyfin.GetTargetAddr())
+	}
 	log.Printf("   缓存TTL: %v", config.Global.GetCacheTTL())
 
 	go func() {
@@ -54,6 +65,9 @@ func main() {
 		if embyServer != nil {
 			embyServer.Stop()
 		}
+		if jellyfinServer != nil {
+			jellyfinServer.Stop()
+		}
 		fntvServer.Stop()
 	}()
 
@@ -61,6 +75,14 @@ func main() {
 		go func() {
 			if err := embyServer.Start(); err != nil && err != http.ErrServerClosed {
 				log.Fatalf("Emby 代理启动失败: %v", err)
+			}
+		}()
+	}
+
+	if jellyfinServer != nil {
+		go func() {
+			if err := jellyfinServer.Start(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("Jellyfin 代理启动失败: %v", err)
 			}
 		}()
 	}

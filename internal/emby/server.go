@@ -12,12 +12,15 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 // Server Emby 302 代理服务器
 type Server struct {
 	config          *config.Config
+	service         *config.EmbyConfig
+	name            string
 	logger          *logger.Logger
 	cache           *cache.Cache
 	playbackHandler *PlaybackHandler
@@ -25,26 +28,48 @@ type Server struct {
 	proxy           *httputil.ReverseProxy
 	targetURL       *url.URL
 	httpServer      *http.Server
+	prepareOnce     sync.Once
+	stopCache       sync.Once
 }
 
 // NewServer 创建 Emby 代理服务器
 func NewServer(cfg *config.Config) (*Server, error) {
+	return newServer(cfg, &cfg.Emby, "Emby")
+}
+
+// NewJellyfinServer uses the shared protocol without copying configuration locks
+// or mutating Emby's configuration, cache or running server.
+func NewJellyfinServer(cfg *config.Config) (*Server, error) {
+	return newServer(cfg, &cfg.Jellyfin, "Jellyfin")
+}
+
+func newServer(cfg *config.Config, service *config.EmbyConfig, name string) (*Server, error) {
 	log := logger.New(cfg.GetLogLevel(), cfg.LogDir)
 
-	targetURL, err := url.Parse(cfg.Emby.GetTargetAddr())
+	targetURL, err := url.Parse(service.GetTargetAddr())
 	if err != nil {
 		return nil, err
 	}
 
-	ttl := cfg.Emby.GetCacheTTL(cfg.GetCacheTTL())
+	ttl := service.GetCacheTTL(cfg.GetCacheTTL())
 	c := cache.NewWithStreamTTL(ttl)
 
-	ph := NewPlaybackHandler(c, log, &cfg.Emby)
-	sh := NewStreamHandler(c, log, &cfg.Emby, targetURL)
+	ph := NewPlaybackHandler(c, log, service)
+	sh := NewStreamHandler(c, log, service, targetURL)
+	if service.GetDeliveryMode() == "direct" {
+		issuer, err := newDirectIssuer(cfg, service, c, log)
+		if err != nil {
+			c.Stop()
+			return nil, err
+		}
+		ph.direct, sh.direct = issuer, issuer
+	}
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 
 	return &Server{
 		config:          cfg,
+		service:         service,
+		name:            name,
 		logger:          log,
 		cache:           c,
 		playbackHandler: ph,
@@ -56,24 +81,30 @@ func NewServer(cfg *config.Config) (*Server, error) {
 
 // Start 启动 Emby 代理
 func (s *Server) Start() error {
-	originalDirector := s.proxy.Director
-	s.proxy.Director = func(req *http.Request) {
-		originalDirector(req)
-		req.Host = s.targetURL.Host
-	}
-	s.proxy.ModifyResponse = s.handleResponse
-
 	s.httpServer = &http.Server{
-		Addr:    s.config.Emby.GetListenAddr(),
-		Handler: s.loggingMiddleware(s.proxy),
+		Addr: s.service.GetListenAddr(), Handler: s.Handler(),
+		ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second,
 	}
-
-	s.logger.Info("🚀 [Emby] 代理启动: %s -> %s", s.config.Emby.GetListenAddr(), s.config.Emby.GetTargetAddr())
+	s.logger.Info("[%s] proxy listener: %s", s.name, s.service.GetListenAddr())
 	return s.httpServer.ListenAndServe()
+}
+
+// Handler embeds this adapter without an additional listener.
+func (s *Server) Handler() http.Handler {
+	s.prepareOnce.Do(func() {
+		originalDirector := s.proxy.Director
+		s.proxy.Director = func(req *http.Request) {
+			originalDirector(req)
+			req.Host = s.targetURL.Host
+		}
+		s.proxy.ModifyResponse = s.handleResponse
+	})
+	return s.loggingMiddleware(s.proxy)
 }
 
 // Stop 优雅关闭
 func (s *Server) Stop() error {
+	defer s.stopCache.Do(s.cache.Stop)
 	if s.httpServer != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -95,7 +126,10 @@ func (s *Server) handleResponse(resp *http.Response) error {
 
 	newBody, modified, err := s.playbackHandler.Handle(resp, body)
 	if err != nil {
-		s.logger.Error("[Emby] 处理 PlaybackInfo 失败: %v", err)
+		s.logger.Error("[%s] 处理 PlaybackInfo 失败: %v", s.name, err)
+		if s.service.GetDeliveryMode() == "direct" {
+			return err
+		}
 		newBody = body
 	}
 
@@ -119,7 +153,7 @@ func isPlaybackInfoRequest(req *http.Request) bool {
 
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.logger.Debug("[Emby] 请求: %s %s", r.Method, r.URL.Path)
+		s.logger.Debug("[%s] 请求: %s %s", s.name, r.Method, r.URL.Path)
 
 		if s.streamHandler.Handle(w, r) {
 			return

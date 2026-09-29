@@ -1,0 +1,43 @@
+# 独立 Emby 测试代理：部署于 Linux NAS，媒体服务部署在另一台机房服务器。
+# 使用 0.9.8-relay.2 正式镜像；旧 RC 镜像不支持此配置。
+# 仅直传 STRM/远程源走媒体节点；本地文件、音频/视频转码仍回原 Emby。
+role: proxy
+# 顶层参数控制飞牛影视，不控制 Emby；保留原行为。
+delivery_mode: proxy
+stream_mode: redirect
+# 当前进程仍启动飞牛监听；仅绑定回环，不作为测试入口。
+listen: "127.0.0.1:28006"
+target: "http://127.0.0.1:8005"
+log_level: info
+cache_ttl: 60
+# 必须与源站 URL 的 host:port 一致；两端分别限制，不能填任意公网目标。
+allowed_upstreams:
+  - "media-source.internal:5244"
+# 必須与 Emby 返回的 STRM 文件路径及本容器只读挂载位置一致。
+allowed_strm_roots:
+  - "/mnt/strm"
+media:
+  # 改成已经部署好的机房媒体节点公网 HTTPS 地址。
+  public_base_url: "https://media.example.com:49965"
+  # 从现有媒体节点安全复制同一密钥；64 位十六进制文本，权限 0600。
+  # 不要两端分别自动生成，也不要提交真实密钥。
+  token_key_file: "/run/secrets/media_key"
+  # 默认 3600；范围 1–86400 秒。到期后重新获取播放地址。
+  token_ttl_seconds: 3600
+  # role: proxy 不监听媒体端口、不需要媒体 TLS 证书。
+emby:
+  enabled: true
+  # redirect（默认）保留原有源站 302；direct 签发机房媒体地址。
+  delivery_mode: direct
+  # 独立测试入口；按 NAS 实际地址修改，不覆盖原 Emby 端口。
+  listen: "0.0.0.0:18097"
+  # host 网络下指向 NAS 原 Emby 的宿主机端口。
+  target: "http://127.0.0.1:8097"
+  cache_ttl: 60
+  # direct 的签发/授权失败不会回退暴露原始源站 URL。
+  proxy_error_strategy: reject
+  # 可选：改写 STRM 内容中的源 URL，不是本地文件路径映射。
+  # strm_path_map:
+  #   - "http://old-source:5244 => http://media-source.internal:5244"
+jellyfin:
+  enabled: false

@@ -29,4 +29,16 @@ func TestDirectExamplesLoad(t *testing.T) {
 			}
 		})
 	}
+	for _, service := range []string{"emby", "jellyfin"} {
+		t.Run(service, func(t *testing.T) {
+			viper.Reset()
+			Global = &Config{}
+			if err := Load(filepath.Join("..", "..", "deploy", service+"-direct-proxy", "config.yaml.example")); err != nil {
+				t.Fatal(err)
+			}
+			if Global.GetRole() != "proxy" {
+				t.Fatalf("role %s", Global.GetRole())
+			}
+		})
+	}
 }

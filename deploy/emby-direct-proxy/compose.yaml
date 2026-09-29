@@ -1,0 +1,17 @@
+services:
+  emby-direct-proxy:
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
+    # 可选源码构建；启用时将 image 改成本地标签。
+    # build:
+    #   context: ../..
+    restart: unless-stopped
+    # Linux NAS 专用；监听地址由 config.yaml 限定，无需 ports 映射。
+    network_mode: host
+    environment:
+      CONFIG: /app/config.yaml
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      # 左侧改成 NAS 的实际 STRM 挂载目录；右侧匹配 Emby 返回的路径。
+      - /replace/with/host/strm:/mnt/strm:ro
+      # 先创建真实文件并设为 0600，禁止让 Docker 自动创建成目录。
+      - ./secrets/media_key:/run/secrets/media_key:ro

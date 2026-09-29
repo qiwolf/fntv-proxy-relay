@@ -2,7 +2,7 @@
 
 原有 302、同源中继及独立 Emby 代理均保留，旧配置不需要迁移。新功能将播放授权和媒体传输分开：客户端访问 VPS 上的飞牛入口取得临时播放地址，再直接向专用媒体服务器取数据。媒体服务器应放在希望承担出口流量的网络中；放在家庭网络后再经隧道出机房，仍会消耗家庭/隧道带宽。
 
-本指南适用于 `v0.9.8-relay.2-rc.1` 预发布版，容器标签为 `0.9.8-relay.2-rc.1`，提供 `linux/amd64`、`linux/arm64`。预发布版不覆盖稳定版 `latest`；旧版本不包含本指南新增的直出功能。
+本指南适用于正式版 `v0.9.8-relay.2` 的默认 `/app/fntv-proxy` 入口，固定镜像标签为 `0.9.8-relay.2`，发布构建面向 `linux/amd64`、`linux/arm64`。三服务合并入口使用不同配置与程序，见 [UNIFIED.md](UNIFIED.md)。
 
 ## 先选部署方式：不一定需要两个容器
 
@@ -55,7 +55,7 @@
 | `role: media` | 仅专用媒体监听；没有飞牛网页、登录或 Emby 代理 | 校验票据并回源传输 |
 | `role: all`、`delivery_mode: direct`、`stream_mode: relay` | 飞牛代理与独立媒体端口，可选 Emby | 同一进程签发并校验票据 |
 
-`role` 默认 `proxy`，`delivery_mode` 默认 `proxy`，原 `stream_mode` 默认 `redirect`。`delivery_mode` 只控制播放地址签发端：`proxy/all` 可设为 `direct`，并要求 `stream_mode: relay`；纯 `media` 角色不设置该项，保留默认值，不能配置为 `direct`。`role: all` 本身也要求 `stream_mode: relay`。Emby 的处理逻辑独立，不会自动切换到本指南的直出模式。除日志配置外，配置修改均须重启。
+`role` 默认 `proxy`，`delivery_mode` 默认 `proxy`，原 `stream_mode` 默认 `redirect`。顶层 `delivery_mode` 控制飞牛播放地址签发：`proxy/all` 可设为 `direct`，并要求 `stream_mode: relay`；纯 `media` 角色不设置该项，保留默认值，不能配置为 `direct`。`role: all` 本身也要求 `stream_mode: relay`。Emby/Jellyfin 不会自动跟随顶层开关，分别启用各自 `delivery_mode: direct`，参见 [Emby](EMBY_DIRECT.md) / [Jellyfin](JELLYFIN_DIRECT.md)。默认程序中这些适配器共用顶层媒体密钥；独立隔离见 [统一指南](UNIFIED.md)。除日志配置外，配置修改均须重启。
 
 证书文件内容可热加载（见下文），不需要重启；证书路径、运行角色和播放密钥仍须重启才能变更。本次不实现证书自动申请、续期或服务器间同步。
 
@@ -117,7 +117,7 @@ docker compose -f compose.media.yaml pull
 docker compose -f compose.media.yaml up -d --no-build
 ```
 
-Compose 固定使用 `ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2-rc.1`，不拉取旧的 `latest`。如需本地构建，保留完整仓库并以 `deploy/direct` 为工作目录，取消对应 Compose 的 `build` 两行注释，将 `image` 改为 `fntv-proxy-relay:direct-local`，再运行 `docker compose -f compose.all.yaml up -d --build`（分机模式替换文件名）。
+Compose 固定使用 `ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2`。如需本地构建，保留完整仓库并以 `deploy/direct` 为工作目录，取消对应 Compose 的 `build` 两行注释，将 `image` 改为 `fntv-proxy-relay:direct-local`，再运行 `docker compose -f compose.all.yaml up -d --build`（分机模式替换文件名）。
 
 密钥文件和证书目录只读绑定挂载；Linux 上密钥绑定挂载保留宿主机 `0600` 权限。不要直接替换为默认 `0444` 的 Compose/Docker secret 挂载，这会触发权限检查失败；其他容器平台也需验证挂载后的实际权限。所有绑定挂载的源配置文件、密钥文件必须提前准备，否则 Docker 可能创建同名目录导致启动失败。示例中的内部主机名必须在容器内可解析且可达；容器里的 `127.0.0.1` 不是宿主机。若使用局域网路径，确保容器路由与 DNS 正确。
 

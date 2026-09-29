@@ -1,0 +1,26 @@
+services:
+  unified-proxy:
+    # 正式镜像同时包含传统代理和统一代理；统一配置必须选择此 entrypoint。
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
+    entrypoint: ["/app/fntv-unified"]
+    # 可选源码构建：取消注释，并把 image 改成自定义本地标签。
+    # build:
+    #   context: ../..
+    container_name: fntv-unified-proxy
+    restart: unless-stopped
+    # Linux host 网络；端口由配置决定，不额外添加 ports。
+    network_mode: host
+    environment:
+      CONFIG: /app/configs/unified.yaml
+      TZ: Asia/Shanghai
+    volumes:
+      - ./config.yaml:/app/configs/unified.yaml:ro
+      # 每个服务单独密钥，预先准备 64 位十六进制文件，权限 0600，目录 0700。
+      # 统一模式要求显式文件，不自动生成；将对应文件安全复制到媒体端。
+      - ./secrets:/run/secrets:ro
+      # 左侧改成实际宿主机 STRM 目录，右侧匹配服务器返回的路径。
+      # 若各服务路径不同，可把同一源目录挂载到多个不同容器路径。
+      - /path/to/strm:/mnt/strm:ro
+      # 只有主代理自行终止 HTTPS 时才启用此挂载。
+      # - ./certs:/app/certs:ro
+      - ./logs:/app/logs

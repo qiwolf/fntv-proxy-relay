@@ -1,0 +1,45 @@
+# Jellyfin 独立测试代理放在 NAS；视频媒体服务放在机房。
+# 使用 0.9.8-relay.2 正式镜像，旧 RC 镜像不支持此配置。
+# 仅直传 STRM/远程源走媒体节点；本地文件和转码仍由原 Jellyfin 处理。
+role: proxy
+# 顶层两项只控制飞牛影视，不控制 Jellyfin。
+delivery_mode: proxy
+stream_mode: redirect
+# 当前进程仍启动飞牛入口，不使用时仅绑定回环地址。
+listen: "127.0.0.1:28007"
+target: "http://127.0.0.1:8005"
+log_level: info
+cache_ttl: 60
+# 两端均填写真实源站 host:port；媒体节点还会检查重定向目标。
+allowed_upstreams:
+  - "media-source.internal:5244"
+# 与 Jellyfin 返回的 STRM 绝对路径及本容器挂载位置一致。
+# 若 Jellyfin 返回 /media/strm/...，请同时修改这里和 Compose 挂载右侧。
+allowed_strm_roots:
+  - "/mnt/strm"
+media:
+  # 推荐独立媒体容器、端口、密钥；不是 Jellyfin 登录入口。
+  public_base_url: "https://media.example.com:49966"
+  # 与机房节点共享同一 64 位十六进制密钥文件，权限 0600。
+  # 不要两端各自自动生成，不要提交真实密钥。
+  token_key_file: "/run/secrets/media_key"
+  # 默认 3600，范围 1–86400 秒；过期后需要重新获取播放地址。
+  token_ttl_seconds: 3600
+  # role: proxy 不启动媒体监听，不需要在 NAS 配置媒体 TLS 证书。
+emby:
+  # 本测试只启用 Jellyfin，不占用 Emby 监听端口。
+  enabled: false
+jellyfin:
+  enabled: true
+  # redirect 为默认源站 302；direct 使用机房媒体节点。
+  delivery_mode: direct
+  # 改为 NAS 实际地址和空闲端口，不覆盖原 Jellyfin 入口。
+  listen: "0.0.0.0:18096"
+  # host 网络下连接原 Jellyfin 的宿主机端口。
+  target: "http://127.0.0.1:8096"
+  cache_ttl: 60
+  # direct 授权/签发失败不能回退泄露内网源地址。
+  proxy_error_strategy: reject
+  # 可选：只改写 STRM 内容中的 URL，不改变媒体库或文件挂载路径。
+  # strm_path_map:
+  #   - "http://old-source:5244 => http://media-source.internal:5244"

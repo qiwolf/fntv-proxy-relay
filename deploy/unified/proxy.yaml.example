@@ -1,0 +1,59 @@
+# NAS 上的统一主代理，使用 /app/fntv-unified；不能交给默认 fntv-proxy 读取。
+# 下列端口是独立部署示例，不自动接管原容器；请先检查宿主机端口占用。
+# 此格式严格检查未知字段；不要添加传统配置中的 emby/jellyfin/delivery_mode 字段。
+# 统一模式固定 direct，不支持转码迁移；源服务器仍负责本地文件和转码。
+role: proxy
+# 三个域名共用此入口，按 Host 分流；未知 Host 不选择默认服务。
+# 同一 IP+端口不能自动识别 Emby/Jellyfin；IP 访问使用下方 direct_listen。
+listen: "0.0.0.0:28008"
+# HTTP 仅用于内网或可信 HTTPS 反向代理后方。
+allow_http: true
+# 如直接提供 HTTPS，关闭 allow_http 并同时指定证书链和私钥。
+# 该 TLS 设置同时作用于共享入口和所有 direct_listen；届时 IP 客户端也须用 HTTPS。
+# 证书需覆盖三个域名；不自动签发、续期或同步。整个目录挂载支持有效内容热加载。
+# tls_cert_file: /app/certs/fullchain.pem
+# tls_key_file: /app/certs/privkey.pem
+# 客户端自动获得此媒体地址，不要把它当成登录服务器。
+media_public_base_url: "https://media.example.com:49967"
+services:
+  # 服务标识参与票据认证，两端必须一致；三种服务使用不同密钥。
+  # 标识格式：小写字母开头，后续仅小写字母、数字、连字符，总长度不超过 32。
+  # 可以删去不使用的服务块；不能让两个服务拥有相同 hosts。
+  fntv:
+    type: fntv
+    hosts: ["fntv.example.com"]
+    # 保留 IP 直连；可删除此项以仅使用域名入口。各监听地址必须互不冲突。
+    # hosts 只填域名，不填协议/路径/通配符；路由忽略端口，不能靠同域名不同端口分服务。
+    direct_listen: "0.0.0.0:28015"
+    target: "http://127.0.0.1:8005"
+    token_key_file: /run/secrets/fntv.key
+    # 统一模式必须显式提供 64 位十六进制文件，0600；每服务独立，签发端/媒体端内容一致。
+    # 0/省略默认 3600，范围 1–86400 秒；票据过期后拖动/重连需重新取得地址。
+    token_ttl_seconds: 3600
+    # 必须为真实源站 host:port；两端都检查，不填写 URL 或整个网段。
+    allowed_upstreams: ["media-source.internal:5244"]
+    # 必须与飞牛返回路径及容器内只读挂载路径一致。
+    allowed_strm_roots: ["/mnt/strm"]
+    # 可选浏览器 Origin；媒体端必须配置实际入口，网页播放不能仅依赖原生客户端测试。
+    allowed_origins: ["https://fntv.example.com", "http://192.0.2.10:28015"]
+  emby:
+    type: emby
+    hosts: ["emby.example.com"]
+    direct_listen: "0.0.0.0:18197"
+    target: "http://127.0.0.1:8097"
+    token_key_file: /run/secrets/emby.key
+    token_ttl_seconds: 3600
+    allowed_upstreams: ["media-source.internal:5244"]
+    allowed_strm_roots: ["/mnt/strm"]
+    allowed_origins: ["https://emby.example.com", "http://192.0.2.10:18197"]
+  jellyfin:
+    type: jellyfin
+    hosts: ["jellyfin.example.com"]
+    direct_listen: "0.0.0.0:18196"
+    target: "http://127.0.0.1:8096"
+    token_key_file: /run/secrets/jellyfin.key
+    token_ttl_seconds: 3600
+    allowed_upstreams: ["media-source.internal:5244"]
+    # Jellyfin 若使用不同容器路径，修改此项并新增对应只读挂载。
+    allowed_strm_roots: ["/mnt/strm"]
+    allowed_origins: ["https://jellyfin.example.com", "http://192.0.2.10:18196"]

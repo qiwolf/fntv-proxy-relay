@@ -9,6 +9,7 @@ import (
 // EmbyConfig Emby 302 代理配置
 type EmbyConfig struct {
 	Enabled            bool     `mapstructure:"enabled"`
+	DeliveryMode       string   `mapstructure:"delivery_mode"`
 	ListenAddr         string   `mapstructure:"listen"`
 	TargetAddr         string   `mapstructure:"target"`
 	CacheTTLMinutes    int      `mapstructure:"cache_ttl"`
@@ -24,6 +25,14 @@ const (
 	EmbyErrorStrategyOrigin = "origin"
 	EmbyErrorStrategyReject = "reject"
 )
+
+func (e *EmbyConfig) GetDeliveryMode() string {
+	v := strings.ToLower(strings.TrimSpace(e.DeliveryMode))
+	if v == "" {
+		return "redirect"
+	}
+	return v
+}
 
 // initEmbyDefaults 初始化 Emby 配置默认值
 func initEmbyDefaults() {

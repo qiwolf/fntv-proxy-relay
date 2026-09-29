@@ -34,6 +34,7 @@ type Server struct {
 	stopping        bool
 	started         bool
 	stopCache       sync.Once
+	prepareOnce     sync.Once
 }
 
 // NewServer 创建代理服务器
@@ -79,7 +80,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 			c.Stop()
 			return nil, err
 		}
-		s.mediaHandler, err = handler.NewMediaHandler(sh, key, time.Duration(media.TokenTTLSeconds)*time.Second, media.PublicBaseURL, media.AllowedOrigins)
+		s.mediaHandler, err = handler.NewScopedMediaHandler(sh, key, time.Duration(media.TokenTTLSeconds)*time.Second, media.PublicBaseURL, media.AllowedOrigins, media.TenantID)
 		if err != nil {
 			c.Stop()
 			return nil, err
@@ -102,18 +103,7 @@ func (s *Server) Start() error {
 		s.mu.Unlock()
 		return fmt.Errorf("server already started")
 	}
-	// 设置Director
-	originalDirector := s.proxy.Director
-	s.proxy.Director = func(req *http.Request) {
-		originalDirector(req)
-		req.Host = req.URL.Host
-		if s.isStreamAPIRequest(req) {
-			req.Header.Set("Accept-Encoding", "identity")
-		}
-	}
-
-	// 设置ModifyResponse
-	s.proxy.ModifyResponse = s.handleResponse
+	s.prepare()
 
 	// Bind every requested listener before serving any traffic. A failed media
 	// listener must not leave a seemingly healthy, half-started deployment.
@@ -123,19 +113,19 @@ func (s *Server) Start() error {
 	}
 	var endpoints []endpoint
 	if s.config.GetRole() != "media" {
-		s.httpServer = newHTTPServer(s.config.GetListenAddr(), s.loggingMiddleware(s.proxy))
+		s.httpServer = newHTTPServer(s.config.GetListenAddr(), s.Handler())
 		endpoints = append(endpoints, endpoint{server: s.httpServer})
 	}
 	if s.config.GetRole() != "proxy" {
 		media := s.config.GetMedia()
 		e := endpoint{server: newHTTPServer(media.Listen, s.mediaHandler)}
 		if media.TLSCertFile != "" {
-			cert, err := newCertificateReloader(media.TLSCertFile, media.TLSKeyFile, func(message string) { s.logger.Warn("%s", message) })
+			var err error
+			e.tlsConfig, err = LoadTLSConfig(media.TLSCertFile, media.TLSKeyFile, func(message string) { s.logger.Warn("%s", message) })
 			if err != nil {
 				s.mu.Unlock()
 				return fmt.Errorf("load media TLS certificate: %w", err)
 			}
-			e.tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: cert.GetCertificate, NextProtos: []string{"http/1.1"}}
 		}
 		endpoints = append(endpoints, e)
 	}
@@ -164,6 +154,34 @@ func (s *Server) Start() error {
 	err := <-results
 	_ = s.Stop()
 	return err
+}
+
+// Handler embeds the proxy without starting an additional TCP listener.
+func (s *Server) Handler() http.Handler      { s.prepare(); return s.loggingMiddleware(s.proxy) }
+func (s *Server) MediaHandler() http.Handler { return s.mediaHandler }
+func (s *Server) prepare() {
+	s.prepareOnce.Do(func() {
+		originalDirector := s.proxy.Director
+		s.proxy.Director = func(req *http.Request) {
+			originalDirector(req)
+			req.Host = req.URL.Host
+			if s.isStreamAPIRequest(req) {
+				req.Header.Set("Accept-Encoding", "identity")
+			}
+		}
+
+		// 设置ModifyResponse
+		s.proxy.ModifyResponse = s.handleResponse
+	})
+}
+
+// LoadTLSConfig validates the initial pair and hot-reloads replacements.
+func LoadTLSConfig(certFile, keyFile string, warn func(string)) (*tls.Config, error) {
+	c, err := newCertificateReloader(certFile, keyFile, warn)
+	if err != nil {
+		return nil, err
+	}
+	return &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: c.GetCertificate, NextProtos: []string{"http/1.1"}}, nil
 }
 
 func newHTTPServer(addr string, h http.Handler) *http.Server {

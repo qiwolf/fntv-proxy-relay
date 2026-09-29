@@ -26,6 +26,7 @@ type Config struct {
 	AllowedStrmRoots []string      `mapstructure:"allowed_strm_roots"`
 	PublicBaseURL    string        `mapstructure:"public_base_url"`
 	Emby             EmbyConfig    `mapstructure:"emby"`
+	Jellyfin         EmbyConfig    `mapstructure:"jellyfin"`
 	mutex            sync.RWMutex
 }
 
@@ -71,9 +72,15 @@ func Load(configPath string) error {
 		}
 	}
 	viper.SetDefault("emby.enabled", false)
+	viper.SetDefault("emby.delivery_mode", "redirect")
 	viper.SetDefault("emby.listen", ":8095")
 	viper.SetDefault("emby.target", "http://127.0.0.1:8096")
 	viper.SetDefault("emby.proxy_error_strategy", EmbyErrorStrategyOrigin)
+	viper.SetDefault("jellyfin.enabled", false)
+	viper.SetDefault("jellyfin.delivery_mode", "redirect")
+	viper.SetDefault("jellyfin.listen", ":8098")
+	viper.SetDefault("jellyfin.target", "http://127.0.0.1:8096")
+	viper.SetDefault("jellyfin.proxy_error_strategy", EmbyErrorStrategyOrigin)
 
 	// 环境变量覆盖
 	viper.SetEnvPrefix("FNTV")
@@ -96,6 +103,7 @@ func Load(configPath string) error {
 	// 转换 cache_ttl 为 Duration（用于直链缓存）
 	Global.CacheTTL = time.Duration(viper.GetInt("cache_ttl")) * time.Minute
 	initEmbyDefaults()
+	Global.Jellyfin.parsePathMap()
 	if err := Global.Validate(); err != nil {
 		return err
 	}
@@ -224,6 +232,18 @@ func (c *Config) GetPublicBaseURL() string {
 
 // Validate rejects unsafe relay configurations before the listener starts.
 func (c *Config) Validate() error {
+	if mode := c.Jellyfin.GetDeliveryMode(); mode != "redirect" && mode != "direct" {
+		return fmt.Errorf("jellyfin.delivery_mode must be redirect or direct")
+	}
+	if c.Jellyfin.Enabled && c.Jellyfin.GetDeliveryMode() == "direct" && len(c.AllowedStrmRoots) == 0 {
+		return fmt.Errorf("allowed_strm_roots is required for Jellyfin direct delivery")
+	}
+	if mode := c.Emby.GetDeliveryMode(); mode != "redirect" && mode != "direct" {
+		return fmt.Errorf("emby.delivery_mode must be redirect or direct")
+	}
+	if c.Emby.Enabled && c.Emby.GetDeliveryMode() == "direct" && len(c.AllowedStrmRoots) == 0 {
+		return fmt.Errorf("allowed_strm_roots is required for Emby direct delivery")
+	}
 	mode := strings.ToLower(strings.TrimSpace(c.StreamMode))
 	if c.GetRole() == "media" {
 		mode = "relay"

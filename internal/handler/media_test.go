@@ -22,6 +22,57 @@ func mediaFixture(t *testing.T, upstream string) *MediaHandler {
 	return m
 }
 
+func TestScopedMediaIsolationAndLegacy(t *testing.T) {
+	h, _ := newRelayHandler(t, "http://source.example")
+	key := bytes.Repeat([]byte{42}, 32)
+	makeHandler := func(scope string, key []byte) *MediaHandler {
+		m, err := NewScopedMediaHandler(h, key, time.Hour, "", nil, scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.now = func() time.Time { return time.Unix(10000, 0) }
+		return m
+	}
+	a := makeHandler("emby", key)
+	b := makeHandler("jellyfin", key) // Isolation holds even with accidentally reused keys.
+	legacy := makeHandler("", key)
+	issued, err := a.IssueURL("http://source.example/video")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(issued, "/fntv-media/emby/") {
+		t.Fatal("missing tenant namespace")
+	}
+	if _, ok := a.ticket(httptest.NewRequest("GET", issued, nil)); !ok {
+		t.Fatal("valid scoped ticket rejected")
+	}
+	for _, candidate := range []struct {
+		m    *MediaHandler
+		path string
+	}{
+		{b, issued}, {b, strings.Replace(issued, "/emby/", "/jellyfin/", 1)},
+		{legacy, strings.Replace(issued, "/emby/", "/", 1)},
+		{makeHandler("emby", bytes.Repeat([]byte{7}, 32)), issued},
+		{a, issued + "/extra"}, {a, issued + "?"},
+	} {
+		requireMediaAbort(t, candidate.m, httptest.NewRequest("GET", candidate.path, nil))
+	}
+	old, _ := legacy.IssueURL("http://source.example/video")
+	compat, _ := NewMediaHandler(h, key, time.Hour, "", nil)
+	compat.now = legacy.now
+	if _, ok := compat.ticket(httptest.NewRequest("GET", old, nil)); !ok {
+		t.Fatal("legacy compatibility lost")
+	}
+	requireMediaAbort(t, a, httptest.NewRequest("GET", strings.Replace(old, mediaPathPrefix, a.PathPrefix(), 1), nil))
+	a.now = func() time.Time { return time.Unix(13600, 0) }
+	requireMediaAbort(t, a, httptest.NewRequest("GET", issued, nil))
+	for _, invalid := range []string{"Emby", "../emby", "emby/jellyfin", "-emby", strings.Repeat("a", 33)} {
+		if _, err := NewScopedMediaHandler(h, key, time.Hour, "", nil, invalid); err == nil {
+			t.Errorf("accepted scope %q", invalid)
+		}
+	}
+}
+
 func requireMediaAbort(t *testing.T, m *MediaHandler, r *http.Request) {
 	t.Helper()
 	w := httptest.NewRecorder()
