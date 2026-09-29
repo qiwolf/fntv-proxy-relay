@@ -6,6 +6,14 @@
 
 > 本项目派生自 [jimboo7339/fntv-proxy](https://github.com/jimboo7339/fntv-proxy)。上游未提供明确 LICENSE；公开源码或容器不等于授予再分发或商业使用许可。详见 [NOTICE.md](NOTICE.md)。
 
+## 30 秒了解产品
+
+中文字幕 · 无旁白 · 背景配乐 · 1080P。介绍三端支持、网页配置、播放模式与机房直出。
+
+[![播放 30 秒产品介绍](docs/media/product-video-cover.jpg)](https://github.com/qiwolf/fntv-proxy-relay/releases/download/v0.9.8-relay.5/relay-product-introduction-1080p.mp4)
+
+[观看或下载视频](https://github.com/qiwolf/fntv-proxy-relay/releases/download/v0.9.8-relay.5/relay-product-introduction-1080p.mp4)
+
 ## 快速启动 Web 管理
 
 下载 [管理容器 Compose 示例](compose.manager.yaml.example)，在该文件所在目录执行：
