@@ -1,21 +1,17 @@
 # 使用包含管理入口的正式镜像；旧镜像不包含 /app/fntv-manager。
-# 先配置可信 HTTPS 反代和访问限制；首个访问者可以创建唯一管理员。
+# 启动后访问 http://服务器IP:18764；首次访问设置唯一管理员。
 services:
   relay-manager:
-    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.4
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.5
     restart: unless-stopped
     # 显式启用管理入口；镜像默认的旧 ENTRYPOINT 不变。
     entrypoint: ["/app/fntv-manager"]
     command:
-      - "-listen=0.0.0.0:18764"
-      - "-public-url=https://relay-admin.example.com"
       - "-data-dir=/data/management"
     ports:
-      # 仅宿主机 loopback 暴露内部 HTTP，交给本机 HTTPS 反代。
-      # 反代必须发送 Host: relay-admin.example.com。
-      # 若反代也是容器，使用共同 Docker 网络访问 relay-manager:18764，
-      # 无需发布本管理端口；不要从反代容器访问它自己的 127.0.0.1。
-      - "127.0.0.1:18764:18764"
+      # 左侧为宿主机访问端口，可修改；不需要域名、证书或反代。
+      # 管理入口建议仅向可信网络开放。
+      - "18764:18764"
       # 以下业务端口仅为示例：按 UI 监听和实际用途启用，避免与旧服务冲突。
       # - "28008:28008" # 统一主代理共享入口
       # - "28005:28005" # 飞牛或单服务主入口

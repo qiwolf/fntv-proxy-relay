@@ -47,7 +47,7 @@ func TestAPIAuthenticationAndPersistence(t *testing.T) {
 	if got := call("GET", "/api/status", "", auth, "https://evil.example", host); got != 403 {
 		t.Fatal(got)
 	}
-	if got := call("GET", "/api/status", "", auth, "", "evil.example"); got != 403 {
+	if got := call("GET", "/api/status", "", auth, "", "relay.lan:19864"); got != 200 {
 		t.Fatal(got)
 	}
 	if got := call("GET", "/api/status", "", auth, "", host); got != 200 {

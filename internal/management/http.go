@@ -23,14 +23,13 @@ type API struct {
 	Runtime      *RuntimeManager
 	Audit        *DocumentStore
 	token        [32]byte
-	host         string
 }
 
-func NewAPI(store *DocumentStore, keys *KeyStore, token, host string) (*API, error) {
-	if store == nil || keys == nil || len(token) < 32 || strings.TrimSpace(token) != token || host == "" {
-		return nil, errors.New("private stores, a strong token and exact host are required")
+func NewAPI(store *DocumentStore, keys *KeyStore, token, _ string) (*API, error) {
+	if store == nil || keys == nil || len(token) < 32 || strings.TrimSpace(token) != token {
+		return nil, errors.New("private stores and a strong token are required")
 	}
-	return &API{Store: store, Keys: keys, token: sha256.Sum256([]byte(token)), host: host}, nil
+	return &API{Store: store, Keys: keys, token: sha256.Sum256([]byte(token))}, nil
 }
 
 func respond(w http.ResponseWriter, status int, value interface{}) {
@@ -68,8 +67,8 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
-	// Exact Host blocks DNS rebinding. No CORS; cross-origin browser calls denied.
-	if r.Host != a.host || (r.Header.Get("Origin") != "" && r.Header.Get("Origin") != "http://"+a.host && r.Header.Get("Origin") != "https://"+a.host) {
+	// No host allowlist: compare the browser origin with this request's address.
+	if r.Header.Get("Sec-Fetch-Site") == "cross-site" || (r.Header.Get("Origin") != "" && r.Header.Get("Origin") != "http://"+r.Host && r.Header.Get("Origin") != "https://"+r.Host) {
 		respond(w, 403, map[string]string{"error": "origin denied"})
 		return
 	}

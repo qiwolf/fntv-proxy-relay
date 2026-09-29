@@ -8,7 +8,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -18,8 +17,8 @@ import (
 )
 
 func main() {
-	listen := flag.String("listen", "127.0.0.1:18764", "management listener")
-	public := flag.String("public-url", "", "HTTPS origin, required for non-loopback binding")
+	listen := flag.String("listen", "0.0.0.0:18764", "management HTTP listener")
+	flag.String("public-url", "", "deprecated compatibility option; no longer required or enforced")
 	data := flag.String("data-dir", "./management-data", "private persistent management directory")
 	legacy := flag.String("legacy-binary", "/app/fntv-proxy", "legacy runtime executable")
 	unified := flag.String("unified-binary", "/app/fntv-unified", "unified runtime executable")
@@ -27,16 +26,6 @@ func main() {
 	host, _, err := net.SplitHostPort(*listen)
 	if err != nil || net.ParseIP(host) == nil {
 		log.Fatal("listener must contain IP and port")
-	}
-	expectedHost := *listen
-	if *public != "" {
-		u, e := url.Parse(*public)
-		if e != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
-			log.Fatal("public-url must be an HTTPS origin")
-		}
-		expectedHost = u.Host
-	} else if !net.ParseIP(host).IsLoopback() {
-		log.Fatal("non-loopback management requires an HTTPS public-url and trusted reverse proxy")
 	}
 	dir, err := filepath.Abs(*data)
 	if err != nil {
@@ -55,7 +44,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	api, err := management.NewAPI(store, keys, strings.Repeat("unused", 8), expectedHost)
+	api, err := management.NewAPI(store, keys, strings.Repeat("unused", 8), "")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -80,10 +69,6 @@ func main() {
 		log.Print("Previously applied runtime could not resume; review configuration in the management UI.")
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Host != expectedHost {
-			http.Error(w, "host denied", 403)
-			return
-		}
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			api.ServeHTTP(w, r)
 			return

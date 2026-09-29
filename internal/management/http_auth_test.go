@@ -83,7 +83,7 @@ func TestHTTPAdminLifecycle(t *testing.T) {
 func TestHTTPAdminRejectCrossOriginAndInvalidJSON(t *testing.T) {
 	a := testAdminAPI(t)
 	body := `{"username":"admin","password":"long-password-1"}`
-	for _, tc := range []struct{ host, origin string }{{"evil.test", ""}, {"localhost:18764", "https://evil.test"}, {"localhost:18764", "null"}} {
+	for _, tc := range []struct{ host, origin string }{{"localhost:18764", "https://evil.test"}, {"localhost:18764", "null"}} {
 		w := authRequest(a, "POST", "/api/auth/setup", body, "", tc.host, tc.origin)
 		if w.Code != 403 {
 			t.Fatal(w.Code)
@@ -104,6 +104,28 @@ func TestHTTPAdminRejectCrossOriginAndInvalidJSON(t *testing.T) {
 	a.ServeHTTP(w, r)
 	if w.Code != 400 {
 		t.Fatal(w.Code)
+	}
+}
+
+func TestManagementDirectAccessWithoutHostAllowlist(t *testing.T) {
+	for _, host := range []string{"192.168.6.185:18764", "nas:29000", "relay.example:18764", "[::1]:18764"} {
+		a := testAdminAPI(t)
+		w := authRequest(a, "GET", "/api/auth/status", "", "", host, "http://"+host)
+		if w.Code != 200 {
+			t.Fatalf("%s: %d", host, w.Code)
+		}
+		w = authRequest(a, "GET", "/api/status", "", "", host, "http://"+host)
+		if w.Code != 401 {
+			t.Fatalf("authentication bypass: %s: %d", host, w.Code)
+		}
+	}
+	a := testAdminAPI(t)
+	r := httptest.NewRequest("GET", "http://nas:18764/api/auth/status", nil)
+	r.Header.Set("Sec-Fetch-Site", "cross-site")
+	w := httptest.NewRecorder()
+	a.ServeHTTP(w, r)
+	if w.Code != 403 {
+		t.Fatal("cross-site browser request accepted", w.Code)
 	}
 }
 func TestHTTPAdminLoginRateLimit(t *testing.T) {
