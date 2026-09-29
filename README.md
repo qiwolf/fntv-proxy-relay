@@ -22,7 +22,9 @@
 
 ## 镜像与两套配置入口
 
-正式版镜像：`ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.3`，发布构建面向 `linux/amd64`、`linux/arm64`。生产建议固定版本，而非依赖可变的 `latest`。
+正式版镜像：`ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.4`，发布构建面向 `linux/amd64`、`linux/arm64`。生产建议固定版本，而非依赖可变的 `latest`。
+
+本版新增 Web 管理入口 `/app/fntv-manager`，支持配置向导、单管理员、密钥与证书管理、保存和应用；原有两套运行入口保持兼容。参见 [本版发布说明](docs/RELEASE-WEBUI.md)。
 
 ```sh
 docker pull ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.3
