@@ -12,6 +12,8 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       # 左侧改成 NAS 的实际 STRM 挂载目录；右侧匹配 Emby 返回的路径。
+      # 查看 Emby 容器的 STRM 挂载右侧及库路径：若为 /mnt/strm，代理右侧也用它。
+      # 左右不必相同；allowed_strm_roots 填右侧。详见 docs/STRM_MOUNTS.md。
       - /replace/with/host/strm:/mnt/strm:ro
       # 先创建真实文件并设为 0600，禁止让 Docker 自动创建成目录。
       - ./secrets/media_key:/run/secrets/media_key:ro

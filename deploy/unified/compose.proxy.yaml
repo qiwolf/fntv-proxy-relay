@@ -18,9 +18,15 @@ services:
       # 每个服务单独密钥，预先准备 64 位十六进制文件，权限 0600，目录 0700。
       # 统一模式要求显式文件，不自动生成；将对应文件安全复制到媒体端。
       - ./secrets:/run/secrets:ro
-      # 左侧改成实际宿主机 STRM 目录，右侧匹配服务器返回的路径。
-      # 若各服务路径不同，可把同一源目录挂载到多个不同容器路径。
+      # 格式：代理宿主机的实际目录:媒体服务器看到的目录:ro；左右不必相同。
+      # 飞牛原生库用 /vol00/strm 时，右侧也写 /vol00/strm。
+      # Emby/Jellyfin 容器若将 STRM 挂到 /mnt/strm，代理右侧也必须写 /mnt/strm。
+      # 三端路径相同只需一条；不同则把同一源目录映射到各自路径，不会复制文件。
+      # 各 services.<id>.allowed_strm_roots 填该服务对应的右侧路径。
+      # 完整例子见 docs/STRM_MOUNTS.md；只保留实际需要的挂载。
       - /path/to/strm:/mnt/strm:ro
+      # - /path/to/strm:/vol00/strm:ro # 飞牛看到原生路径时另加此映射
+      # - /path/to/strm:/media/strm:ro # Jellyfin 看到 /media/strm 时另加此映射
       # 只有主代理自行终止 HTTPS 时才启用此挂载。
       # - ./certs:/app/certs:ro
       - ./logs:/app/logs

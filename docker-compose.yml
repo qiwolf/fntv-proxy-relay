@@ -4,8 +4,15 @@ services:
     container_name: fntv-proxy-relay
     network_mode: host
     volumes:
-      # 挂载strm文件目录（根据实际路径修改）
+      # STRM 格式：代理宿主机的实际目录:媒体服务器看到的目录:ro。
+      # 右侧必须匹配飞牛/Emby/Jellyfin 返回的 STRM 路径，不要求左右相同。
+      # 飞牛原生库用 /vol00/strm 时如下；Emby 若挂到 /mnt/strm，代理也挂到 /mnt/strm。
+      # 同一份源目录可映射多次以兼容不同服务路径；不会复制文件。
+      # allowed_strm_roots 填右侧路径。完整三端示例见 docs/STRM_MOUNTS.md。
       - /vol00/strm:/vol00/strm:ro
+      # 仅在对应媒体库使用这些路径时添加，不要盲目全部启用：
+      # - /vol01/strm:/vol01/strm:ro
+      # - /vol00/strm:/mnt/strm:ro
       # 挂载配置文件（可选，用于热重载）
       - ./config.yaml:/app/config.yaml:ro
       # 可选：挂载日志目录（debug模式）

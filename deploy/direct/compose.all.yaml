@@ -14,6 +14,8 @@ services:
     volumes:
       - ./all.config.yaml:/app/config.yaml:ro
       # 飞牛上报的 STRM 绝对路径必须与容器内路径一致
+      # 左侧是代理宿主机的实际目录，右侧是飞牛看到的目录，左右不必相同。
+      # 同时启用 Emby/Jellyfin 时按各自库内路径追加映射，详见 docs/STRM_MOUNTS.md。
       - /media/strm:/media/strm:ro
       # 手动准备 fullchain.pem / privkey.pem；配置填写的是容器内路径
       # 可同时修改本挂载与配置来使用自定义目录；挂载整个目录以支持热加载

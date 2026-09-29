@@ -13,6 +13,8 @@ services:
     volumes:
       - ./proxy.config.yaml:/app/config.yaml:ro
       # 飞牛上报的 STRM 绝对路径必须与容器内路径一致
+      # 左侧是代理宿主机的实际目录，右侧是飞牛看到的目录，左右不必相同。
+      # 同时启用 Emby/Jellyfin 时按各自库内路径追加映射，详见 docs/STRM_MOUNTS.md。
       - /media/strm:/media/strm:ro
       # 宿主机文件必须为 0600，只读绑定保留 Linux 文件权限
       - ./secrets/media_key:/run/secrets/media_key:ro

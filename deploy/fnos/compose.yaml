@@ -17,4 +17,8 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./logs:/app/logs
+      # 左侧是代理宿主机的实际目录，右侧匹配媒体服务器返回的 STRM 路径。
+      # 此例适用于飞牛原生库 /vol00/strm；不是要求左右必须相同。
+      # Emby/Jellyfin 若挂到 /mnt/strm，这里右侧也用 /mnt/strm，并同步 allowed_strm_roots。
+      # 三端不同路径的完整例子见 docs/STRM_MOUNTS.md。
       - /vol00/strm:/vol00/strm:ro

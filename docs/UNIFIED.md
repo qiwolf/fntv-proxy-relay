@@ -39,6 +39,8 @@ chmod 600 secrets/*.key
 
 ## 文件与启动
 
+先按 [三端 STRM 挂载详解](STRM_MOUNTS.md) 核对路径：左侧是代理宿主机实际目录，右侧是对应媒体服务器看到的目录，不要求左右相同。三端使用不同路径时，同一份源目录可以只读映射到多个目标路径。
+
 样例位于 `deploy/unified/`。分别将 `proxy.yaml.example` 和 `media.yaml.example` 复制成所在机器的 `config.yaml`，修改地址、域名和挂载。主代理必须只读挂载 STRM，容器内路径应与对应媒体服务器返回的路径一致，并受各服务的 STRM 根目录白名单限制。机房只运行媒体角色时不需要 STRM 挂载。
 
 分别在 NAS 和机房创建独立部署目录，从同一版本的 `deploy/unified/` 复制对应 Compose 与 YAML 示例。两端使用同一正式镜像，无需安装 Go 或本地构建：
