@@ -11,6 +11,9 @@ config.yaml
 # 运行时数据
 data/
 logs/
+/management-data/
+/fntv-manager
+*.encrypted.json
 
 # IDE
 .idea/

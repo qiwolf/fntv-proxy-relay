@@ -25,15 +25,16 @@ type Config struct {
 	Services           map[string]Service `yaml:"services"`
 }
 type Service struct {
-	DirectListen     string   `yaml:"direct_listen"`
-	Type             string   `yaml:"type"`
-	Hosts            []string `yaml:"hosts"`
-	Target           string   `yaml:"target"`
-	TokenKeyFile     string   `yaml:"token_key_file"`
-	AllowedUpstreams []string `yaml:"allowed_upstreams"`
-	AllowedStrmRoots []string `yaml:"allowed_strm_roots"`
-	AllowedOrigins   []string `yaml:"allowed_origins"`
-	TokenTTLSeconds  int      `yaml:"token_ttl_seconds"`
+	DirectListen     string                        `yaml:"direct_listen"`
+	Type             string                        `yaml:"type"`
+	Hosts            []string                      `yaml:"hosts"`
+	Target           string                        `yaml:"target"`
+	TokenKeyFile     string                        `yaml:"token_key_file"`
+	AllowedUpstreams []string                      `yaml:"allowed_upstreams"`
+	AllowedStrmRoots []string                      `yaml:"allowed_strm_roots"`
+	STRMDirectoryMap []legacy.STRMDirectoryMapping `yaml:"strm_directory_map"`
+	AllowedOrigins   []string                      `yaml:"allowed_origins"`
+	TokenTTLSeconds  int                           `yaml:"token_ttl_seconds"`
 }
 
 func Load(path string) (*Config, error) {
@@ -157,6 +158,7 @@ func (c *Config) legacy(id string, s Service) *legacy.Config {
 	}
 	cfg := &legacy.Config{Role: c.Role, ListenAddr: c.Listen, TargetAddr: s.Target, StreamMode: "relay", LogLevel: "info", LogDir: "./logs", CacheTTL: time.Hour, AllowedUpstreams: s.AllowedUpstreams, AllowedStrmRoots: s.AllowedStrmRoots,
 		Media: legacy.MediaConfig{TenantID: id, Listen: c.Listen, PublicBaseURL: c.MediaPublicBaseURL, TokenKeyFile: s.TokenKeyFile, TokenTTLSeconds: ttl, AllowedOrigins: s.AllowedOrigins, AllowHTTP: c.AllowHTTP, TLSCertFile: c.TLSCertFile, TLSKeyFile: c.TLSKeyFile}}
+	cfg.STRMDirectoryMap = append([]legacy.STRMDirectoryMapping(nil), s.STRMDirectoryMap...)
 	if c.Role == "proxy" {
 		cfg.DeliveryMode = "direct"
 		if s.Type == "emby" {

@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"fntv-proxy/internal/cache"
+	"fntv-proxy/internal/config"
 	"fntv-proxy/internal/logger"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -29,6 +29,7 @@ type StreamHandler struct {
 	mode             string
 	allowedUpstreams map[string]struct{}
 	allowedStrmRoots []string
+	strmDirectoryMap []config.STRMDirectoryMapping
 	publicBaseURL    string
 	directURL        func(string) (string, error)
 }
@@ -36,6 +37,11 @@ type StreamHandler struct {
 // SetDirectRelay selects an external media gateway. Configure before serving.
 func (h *StreamHandler) SetDirectRelay(issue func(string) (string, error)) {
 	h.directURL = issue
+}
+
+// SetSTRMDirectoryMap must be called before serving requests.
+func (h *StreamHandler) SetSTRMDirectoryMap(m []config.STRMDirectoryMapping) {
+	h.strmDirectoryMap = append([]config.STRMDirectoryMapping(nil), m...)
 }
 
 func NewStreamHandler(c *cache.Cache, l *logger.Logger, mode string, allowedUpstreams, allowedStrmRoots []string, publicBaseURL ...string) *StreamHandler {
@@ -78,7 +84,7 @@ func (h *StreamHandler) Handle(w http.ResponseWriter, r *http.Request) bool {
 	if !found || !strings.EqualFold(filepath.Ext(source.Path), ".strm") {
 		return false
 	}
-	h.logger.Info("🎬 拦截到视频流请求: %s", r.URL.Path)
+	h.logger.Info("🎬 拦截到视频流请求")
 	if h.mode == "relay" {
 		return h.handleRelay(w, r, source)
 	}
@@ -112,7 +118,7 @@ func (h *StreamHandler) handleRedirect(w http.ResponseWriter, r *http.Request, s
 	}
 	strmURL, err := h.readStrm(source.Path, false)
 	if err != nil {
-		h.logger.Error("❌ 读取.strm失败: %v", err)
+		h.logger.Error("❌ 读取.strm失败")
 		return false
 	}
 	finalURL, err := h.resolveURL(strmURL, r)
@@ -130,7 +136,7 @@ func (h *StreamHandler) handleRedirect(w http.ResponseWriter, r *http.Request, s
 func (h *StreamHandler) handleRelay(w http.ResponseWriter, r *http.Request, source cache.MediaSource) bool {
 	strmURL, err := h.readStrm(source.Path, true)
 	if err != nil {
-		h.logger.Warn("relay denied .strm path: %v", err)
+		h.logger.Warn("relay denied .strm path")
 		http.Error(w, "media source is not allowed", http.StatusForbidden)
 		return true
 	}
@@ -279,7 +285,17 @@ func (h *StreamHandler) ReadAllowedStrm(path string) (string, error) {
 }
 
 func (h *StreamHandler) readStrm(path string, enforceRoots bool) (string, error) {
-	if enforceRoots {
+	mapped, err := config.MapSTRMDirectory(path, h.strmDirectoryMap)
+	if err != nil {
+		return "", err
+	}
+	path = mapped
+	if enforceRoots || len(h.strmDirectoryMap) > 0 {
+		// Resolve once and read that resolved path, not the original symlink.
+		path, err = filepath.EvalSymlinks(path)
+		if err != nil {
+			return "", err
+		}
 		allowed, err := pathWithinRoots(path, h.allowedStrmRoots)
 		if err != nil {
 			return "", err
@@ -385,15 +401,7 @@ func copyRelayResponseHeaders(dst, src http.Header) {
 }
 
 func safeURLForLog(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return "[invalid-url]"
-	}
-	host := u.Hostname()
-	if port := u.Port(); port != "" {
-		host = net.JoinHostPort(host, port)
-	}
-	return u.Scheme + "://" + host + u.EscapedPath()
+	return logger.SafeURL(raw)
 }
 
 func (h *StreamHandler) findInCache(r *http.Request, mediaSourceID string) (cache.MediaSource, bool) {

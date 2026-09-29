@@ -1,0 +1,18 @@
+.topbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;padding:16px 24px}
+#dialog{width:512px;color:var(--ink);overflow:auto}
+#dialog h2{font-size:20px;line-height:1.5;margin:0 0 12px}
+#dialog .dialog-field{margin-top:24px}
+#dialog .dialog-field label{margin-bottom:8px}
+#dialog .dialog-field input{min-height:48px}
+#dialog .dialog-note{margin:24px 0 0;padding:16px;background:var(--bg);color:var(--muted);border-radius:var(--radius)}
+#dialog .dialog-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:12px;margin-top:24px;padding-top:24px;border-top:1px solid var(--line)}
+#dialog .dialog-actions button{min-height:48px;min-width:96px;margin:0}
+@media(max-width:512px){#dialog{padding:24px}#dialog .dialog-actions button{flex:1}}
+.topbar-state{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;flex:1 1 320px;min-width:0}
+.topbar-state .pill{border:0;background:var(--soft);font-size:12px;line-height:24px;padding:0 8px;white-space:nowrap}
+#roleLabel{font-weight:600;white-space:nowrap}
+#draftLabel{font-size:12px;white-space:nowrap}
+#account-actions{display:flex;flex:0 0 auto;flex-wrap:nowrap;gap:8px;margin-left:auto}
+#account-actions button{display:inline-flex;align-items:center;justify-content:center;height:40px;min-height:40px;min-width:96px;padding:0 16px;white-space:nowrap;line-height:1;border:1px solid var(--line);background:var(--paper)}
+#account-actions button:hover{background:var(--soft);border-color:var(--control)}
+@media(max-width:768px){.topbar{padding:16px;gap:12px}.topbar-state{flex-basis:100%;gap:8px 12px}#account-actions{margin-left:0}#account-actions button{padding:0 12px}}

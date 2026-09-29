@@ -39,7 +39,7 @@ func main() {
 
 	log.Printf("🚀 FNTV Proxy 启动")
 	log.Printf("   服务角色: %s, 媒体路径: %s", config.Global.GetRole(), config.Global.GetDeliveryMode())
-	if config.Global.GetRole() != "media" {
+	if config.Global.GetRole() != "media" && config.Global.GetFNTVEnabled() {
 		log.Printf("   飞牛监听: %s", config.Global.GetListenAddr())
 	}
 	if config.Global.GetRole() != "proxy" {
@@ -71,23 +71,25 @@ func main() {
 		fntvServer.Stop()
 	}()
 
+	results := make(chan error, 3)
 	if embyServer != nil {
 		go func() {
-			if err := embyServer.Start(); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("Emby 代理启动失败: %v", err)
-			}
+			results <- embyServer.Start()
 		}()
 	}
 
 	if jellyfinServer != nil {
 		go func() {
-			if err := jellyfinServer.Start(); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("Jellyfin 代理启动失败: %v", err)
-			}
+			results <- jellyfinServer.Start()
 		}()
 	}
 
-	if err := fntvServer.Start(); err != nil && err != http.ErrServerClosed {
+	if config.Global.GetFNTVEnabled() || config.Global.GetRole() != "proxy" {
+		go func() { results <- fntvServer.Start() }()
+	} else if embyServer == nil && jellyfinServer == nil {
+		log.Fatal("至少启用一个服务")
+	}
+	if err := <-results; err != nil && err != http.ErrServerClosed {
 		log.Fatalf("飞牛代理启动失败: %v", err)
 	}
 }

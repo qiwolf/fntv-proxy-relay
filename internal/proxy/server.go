@@ -61,6 +61,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	// 创建处理器
 	ph := handler.NewPlaybackHandler(c, log)
 	sh := handler.NewStreamHandler(c, log, cfg.GetStreamMode(), cfg.GetAllowedUpstreams(), cfg.GetAllowedStrmRoots(), cfg.GetPublicBaseURL())
+	sh.SetSTRMDirectoryMap(cfg.GetSTRMDirectoryMap())
 
 	// 创建反向代理
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
@@ -112,7 +113,7 @@ func (s *Server) Start() error {
 		tlsConfig *tls.Config
 	}
 	var endpoints []endpoint
-	if s.config.GetRole() != "media" {
+	if s.config.GetRole() != "media" && s.config.GetFNTVEnabled() {
 		s.httpServer = newHTTPServer(s.config.GetListenAddr(), s.Handler())
 		endpoints = append(endpoints, endpoint{server: s.httpServer})
 	}

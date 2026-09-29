@@ -163,7 +163,7 @@ func TestRedirectModeRemainsAvailable(t *testing.T) {
 
 func TestSafeURLForLogRemovesCredentialsAndQuery(t *testing.T) {
 	got := safeURLForLog("https://user:pass@example.com:8443/media/a.mkv?token=secret")
-	if got != "https://example.com:8443/media/a.mkv" || strings.Contains(got, "secret") || strings.Contains(got, "pass") {
+	if got != "https://example.com:8443" || strings.Contains(got, "secret") || strings.Contains(got, "pass") {
 		t.Fatalf("unsafe log URL: %q", got)
 	}
 }

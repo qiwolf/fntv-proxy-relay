@@ -29,6 +29,7 @@ func newDirectIssuer(cfg *config.Config, service *config.EmbyConfig, c *cache.Ca
 		return nil, err
 	}
 	reader := handler.NewStreamHandler(c, log, "relay", cfg.GetAllowedUpstreams(), cfg.GetAllowedStrmRoots())
+	reader.SetSTRMDirectoryMap(cfg.GetSTRMDirectoryMap())
 	media, err := handler.NewScopedMediaHandler(reader, key, time.Duration(m.TokenTTLSeconds)*time.Second, m.PublicBaseURL, m.AllowedOrigins, m.TenantID)
 	if err != nil {
 		return nil, err

@@ -14,12 +14,13 @@ import (
 
 // StreamHandler 处理 Emby 视频流 302 重定向
 type StreamHandler struct {
-	cache     *cache.Cache
-	logger    *logger.Logger
-	emby      *config.EmbyConfig
-	targetURL *url.URL
-	client    *http.Client
-	direct    *directIssuer
+	cache      *cache.Cache
+	logger     *logger.Logger
+	emby       *config.EmbyConfig
+	targetURL  *url.URL
+	client     *http.Client
+	direct     *directIssuer
+	strmReader *handler.StreamHandler
 }
 
 // NewStreamHandler 创建流处理器
@@ -46,7 +47,7 @@ func (h *StreamHandler) Handle(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
-	h.logger.Info("🎬 [Emby] 拦截流请求: %s", r.URL.Path)
+	h.logger.Info("🎬 [Emby] 拦截流请求")
 
 	mediaSourceID := r.URL.Query().Get("MediaSourceId")
 	source, found := h.findInCache(r, mediaSourceID)
@@ -57,20 +58,20 @@ func (h *StreamHandler) Handle(w http.ResponseWriter, r *http.Request) bool {
 		}
 	}
 	if !found {
-		h.logger.Warn("[Emby] 未找到 MediaSource: %s", mediaSourceID)
+		h.logger.Warn("[Emby] 未找到 MediaSource")
 		return false
 	}
 
 	embyPath := source.Path
 
 	if isLocalPath(embyPath) && !strings.HasSuffix(strings.ToLower(embyPath), ".strm") {
-		h.logger.Info("[Emby] 本地媒体，回源: %s", embyPath)
+		h.logger.Info("[Emby] 本地媒体，回源")
 		redirectToOriginal(w, r)
 		return true
 	}
 
 	if streamURL, ok := h.cache.GetStreamURL(source.ID); ok {
-		h.logger.Info("✅ [Emby] 从缓存获取直链: %s", streamURL.URL)
+		h.logger.Info("✅ [Emby] 从缓存获取直链: %s", logger.SafeURL(streamURL.URL))
 		h.logDirectLinkType(streamURL.URL)
 		http.Redirect(w, r, streamURL.URL, http.StatusFound)
 		return true
@@ -78,18 +79,18 @@ func (h *StreamHandler) Handle(w http.ResponseWriter, r *http.Request) bool {
 
 	mediaURL, err := h.resolveMediaURL(embyPath)
 	if err != nil {
-		h.logger.Error("[Emby] 解析媒体地址失败: %v", err)
+		h.logger.Error("[Emby] 解析媒体地址失败")
 		return h.handleError(w, r)
 	}
-	h.logger.Info("📄 [Emby] 媒体地址: %s", mediaURL)
+	h.logger.Info("📄 [Emby] 媒体地址: %s", logger.SafeURL(mediaURL))
 
 	finalURL, err := h.resolveFinalURL(mediaURL, r)
 	if err != nil {
-		h.logger.Error("[Emby] 解析直链失败: %v", err)
+		h.logger.Error("[Emby] 解析直链失败")
 		return h.handleError(w, r)
 	}
 
-	h.logger.Info("✅ [Emby] 最终直链: %s", finalURL)
+	h.logger.Info("✅ [Emby] 最终直链: %s", logger.SafeURL(finalURL))
 	h.logDirectLinkType(finalURL)
 	h.cache.SetStreamURL(source.ID, finalURL)
 	http.Redirect(w, r, finalURL, http.StatusFound)
@@ -111,15 +112,19 @@ func (h *StreamHandler) handleError(w http.ResponseWriter, r *http.Request) bool
 
 func (h *StreamHandler) resolveMediaURL(embyPath string) (string, error) {
 	mediaURL := embyPath
+	read := handler.ReadStrmFile
+	if h.strmReader != nil {
+		read = h.strmReader.ReadAllowedStrm
+	}
 
 	if strings.HasPrefix(embyPath, "nfs:") && strings.HasSuffix(strings.ToLower(embyPath), ".strm") {
-		content, err := handler.ReadStrmFile(embyPath)
+		content, err := read(embyPath)
 		if err != nil {
 			return "", err
 		}
 		mediaURL = content
 	} else if strings.HasSuffix(strings.ToLower(embyPath), ".strm") && !isRemoteURL(embyPath) {
-		content, err := handler.ReadStrmFile(embyPath)
+		content, err := read(embyPath)
 		if err != nil {
 			return "", err
 		}

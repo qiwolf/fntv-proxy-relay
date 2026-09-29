@@ -5,6 +5,7 @@ import (
 	"context"
 	"fntv-proxy/internal/cache"
 	"fntv-proxy/internal/config"
+	"fntv-proxy/internal/handler"
 	"fntv-proxy/internal/logger"
 	"io"
 	"net/http"
@@ -56,6 +57,10 @@ func newServer(cfg *config.Config, service *config.EmbyConfig, name string) (*Se
 
 	ph := NewPlaybackHandler(c, log, service)
 	sh := NewStreamHandler(c, log, service, targetURL)
+	if len(cfg.GetSTRMDirectoryMap()) > 0 {
+		sh.strmReader = handler.NewStreamHandler(c, log, "redirect", cfg.GetAllowedUpstreams(), cfg.GetAllowedStrmRoots())
+		sh.strmReader.SetSTRMDirectoryMap(cfg.GetSTRMDirectoryMap())
+	}
 	if service.GetDeliveryMode() == "direct" {
 		issuer, err := newDirectIssuer(cfg, service, c, log)
 		if err != nil {

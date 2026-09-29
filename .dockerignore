@@ -12,3 +12,6 @@ secrets
 certs
 **/*.key
 **/*.pem
+management-data
+fntv-manager
+**/*.encrypted.json

@@ -13,22 +13,27 @@ import (
 
 // Config 配置结构
 type Config struct {
-	Role             string        `mapstructure:"role"`
-	DeliveryMode     string        `mapstructure:"delivery_mode"`
-	Media            MediaConfig   `mapstructure:"media"`
-	ListenAddr       string        `mapstructure:"listen"`
-	TargetAddr       string        `mapstructure:"target"`
-	LogLevel         string        `mapstructure:"log_level"`
-	LogDir           string        `mapstructure:"log_dir"`
-	CacheTTL         time.Duration `mapstructure:"cache_ttl"` // 直链缓存 TTL（复用原有配置名）
-	StreamMode       string        `mapstructure:"stream_mode"`
-	AllowedUpstreams []string      `mapstructure:"allowed_upstreams"`
-	AllowedStrmRoots []string      `mapstructure:"allowed_strm_roots"`
-	PublicBaseURL    string        `mapstructure:"public_base_url"`
-	Emby             EmbyConfig    `mapstructure:"emby"`
-	Jellyfin         EmbyConfig    `mapstructure:"jellyfin"`
+	FNTVEnabled      *bool                  `mapstructure:"fntv_enabled"`
+	Role             string                 `mapstructure:"role"`
+	DeliveryMode     string                 `mapstructure:"delivery_mode"`
+	Media            MediaConfig            `mapstructure:"media"`
+	ListenAddr       string                 `mapstructure:"listen"`
+	TargetAddr       string                 `mapstructure:"target"`
+	LogLevel         string                 `mapstructure:"log_level"`
+	LogDir           string                 `mapstructure:"log_dir"`
+	CacheTTL         time.Duration          `mapstructure:"cache_ttl"` // 直链缓存 TTL（复用原有配置名）
+	StreamMode       string                 `mapstructure:"stream_mode"`
+	AllowedUpstreams []string               `mapstructure:"allowed_upstreams"`
+	AllowedStrmRoots []string               `mapstructure:"allowed_strm_roots"`
+	STRMDirectoryMap []STRMDirectoryMapping `mapstructure:"strm_directory_map"`
+	PublicBaseURL    string                 `mapstructure:"public_base_url"`
+	Emby             EmbyConfig             `mapstructure:"emby"`
+	Jellyfin         EmbyConfig             `mapstructure:"jellyfin"`
 	mutex            sync.RWMutex
 }
+
+// GetFNTVEnabled preserves existing deployments that omit this new setting.
+func (c *Config) GetFNTVEnabled() bool { return c.FNTVEnabled == nil || *c.FNTVEnabled }
 
 // Global 全局配置实例
 var Global = &Config{
@@ -232,6 +237,12 @@ func (c *Config) GetPublicBaseURL() string {
 
 // Validate rejects unsafe relay configurations before the listener starts.
 func (c *Config) Validate() error {
+	if err := ValidateSTRMDirectoryMap(c.STRMDirectoryMap); err != nil {
+		return err
+	}
+	if len(c.STRMDirectoryMap) > 0 && len(c.AllowedStrmRoots) == 0 {
+		return fmt.Errorf("allowed_strm_roots is required with strm_directory_map")
+	}
 	if mode := c.Jellyfin.GetDeliveryMode(); mode != "redirect" && mode != "direct" {
 		return fmt.Errorf("jellyfin.delivery_mode must be redirect or direct")
 	}

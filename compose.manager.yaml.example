@@ -1,0 +1,34 @@
+# 使用包含管理入口的正式镜像；旧镜像不包含 /app/fntv-manager。
+# 先配置可信 HTTPS 反代和访问限制；首个访问者可以创建唯一管理员。
+services:
+  relay-manager:
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.4
+    restart: unless-stopped
+    # 显式启用管理入口；镜像默认的旧 ENTRYPOINT 不变。
+    entrypoint: ["/app/fntv-manager"]
+    command:
+      - "-listen=0.0.0.0:18764"
+      - "-public-url=https://relay-admin.example.com"
+      - "-data-dir=/data/management"
+    ports:
+      # 仅宿主机 loopback 暴露内部 HTTP，交给本机 HTTPS 反代。
+      # 反代必须发送 Host: relay-admin.example.com。
+      # 若反代也是容器，使用共同 Docker 网络访问 relay-manager:18764，
+      # 无需发布本管理端口；不要从反代容器访问它自己的 127.0.0.1。
+      - "127.0.0.1:18764:18764"
+      # 以下业务端口仅为示例：按 UI 监听和实际用途启用，避免与旧服务冲突。
+      # - "28008:28008" # 统一主代理共享入口
+      # - "28005:28005" # 飞牛或单服务主入口
+      # - "18097:18097" # Emby 独立入口
+      # - "18096:18096" # Jellyfin 独立入口
+      # - "49967:49967" # 视频端口；媒体端或单容器直出才需要
+    volumes:
+      # 必须持久保存，包含管理员哈希/密钥/证书私钥/配置历史/运行快照。
+      - relay-management:/data/management
+      # 主代理按实际副本路径挂载；媒体服务不需要挂 STRM。
+      # 左边宿主机路径，右边主代理容器内路径；UI “本地目录”填右边。
+      # “来源目录”填飞牛/Emby/Jellyfin 所报告的目录，允许与右边不同。
+      # - /srv/synced-strm:/strm-copy:ro
+    # 不挂载 /var/run/docker.sock；管理器仅启动本容器内代理子进程。
+volumes:
+  relay-management:
