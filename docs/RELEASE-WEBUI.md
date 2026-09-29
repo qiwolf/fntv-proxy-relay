@@ -13,7 +13,7 @@
 
 管理入口为 `/app/fntv-manager`，需显式配置 entrypoint，并持久化管理数据目录。
 镜像默认入口不变，升级镜像不会自动迁移原有 YAML 或启用管理界面。
-部署步骤见 [WEBUI.md](WEBUI.md) 和 [Compose 示例](../compose.manager.yaml.example)。
+部署步骤见 [Web 管理使用说明](https://github.com/qiwolf/fntv-proxy-relay/blob/v0.9.8-relay.4/docs/WEBUI.md) 和 [Compose 示例](https://github.com/qiwolf/fntv-proxy-relay/blob/v0.9.8-relay.4/compose.manager.yaml.example)。
 
 管理入口默认只监听本机；非本机监听需可信 HTTPS 反代及访问限制。
 首次设置管理员前不要公开管理入口。管理数据卷包含敏感材料，必须私有保存并安全备份。
@@ -32,4 +32,4 @@
 独立只读审查未发现明确的认证、秘密返回或应用回滚发布阻断。
 自动发布流程新增 UI 测试和四模式集成测试门禁。
 
-以上不是生产环境全链路验收；本轮不升级生产容器。正式发布仍需推送标签、等待双架构镜像构建并核对远端产物。
+正式版标签和发布页已公开，amd64 / arm64 镜像构建成功；版本镜像与 latest 摘要一致，实际拉取和管理入口检查通过。以上不是生产环境全链路验收；本轮没有升级生产容器。
