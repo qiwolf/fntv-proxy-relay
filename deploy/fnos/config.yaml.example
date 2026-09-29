@@ -1,15 +1,60 @@
+# 默认 /app/fntv-proxy 示例：飞牛同源中继，可选 Emby/Jellyfin。
+# 不适用于 /app/fntv-unified；参数详解见 docs/CONFIGURATION.md。
+# 此例不是机房直出：飞牛视频仍经过主代理；改 direct 前按 docs/DIRECT_MEDIA.md 部署媒体节点。
+role: proxy # 默认 proxy 仅主代理；media 仅媒体服务；all 同时运行（后两种须配置 media）
+delivery_mode: proxy # 仅控制飞牛；proxy 使用 stream_mode，direct 使用专用媒体节点
+
+# 飞牛代理监听入口，:28005 表示所有接口；默认 :28005。
 listen: ":28005"
+# 飞牛影视本体，默认 http://127.0.0.1:8005，不要填代理自己的监听地址。
+# 本 Compose 用 host 网络，因此 127.0.0.1 是 NAS；桥接网络需改为可达后端。
 target: "http://127.0.0.1:8005"
+# trace/debug/info/warn/error，默认 info；详细日志可能含敏感源 URL。
 log_level: "info"
+# 容器内日志目录；本 Compose 将 ./logs 挂到 /app/logs。程序默认 ./logs。
 log_dir: "/app/logs"
+# 直链缓存时间：分钟，默认 60；不是播放票据有效期。
 cache_ttl: 60
 
+# 仅控制飞牛：redirect 默认源站直连；relay 由代理回源转发视频。
 stream_mode: "relay"
+# 飞牛同源 /fntv-relay 地址的外部 origin，留空使用相对路径；不是 media.public_base_url。
+# 改成客户端实际使用的入口，不要将示例域名直接用于生产。
 public_base_url: "https://fn.example.com"
+# relay / direct 允许的真实媒体源 host[:port]，非标准端口必须写明；重定向每一跳都检查。
+# 不是飞牛/Emby/Jellyfin 登录服务器列表，也不接受任意网段放行。
 allowed_upstreams:
   - "192.168.1.20:5244"
+  # - "media-cdn.example.com"
+# 代理可读的 STRM 目录：填 Compose 挂载右侧，与媒体服务器返回的文件路径一致。
+# 如果 Emby/Jellyfin 看到 /mnt/strm，要同时追加该只读挂载及此处允许目录。
+# 同一源目录可映射到不同路径；详见 docs/STRM_MOUNTS.md。
 allowed_strm_roots:
   - "/vol00/strm"
+  # - "/mnt/strm"
 
+# Emby 和 Jellyfin 各自独立开关；顶层 stream_mode 不会使它们进入同源中继。
+# direct 共用顶层 media/allowed_upstreams/allowed_strm_roots；独立密钥用 unified 格式。
 emby:
-  enabled: false
+  enabled: false # 默认关闭；开启后客户端连接下方 listen，不是 target
+  delivery_mode: redirect # 默认源站 302；direct 签发专用媒体票据，须先配置 media
+  listen: ":8095" # 默认 :8095，不得与任何已有服务端口冲突
+  target: "http://127.0.0.1:8096" # Emby 本体地址，按实际宿主机端口修改
+  cache_ttl: 60 # 分钟；省略或 <=0 继承顶层，不表示关闭缓存
+  proxy_error_strategy: origin # redirect 解析失败：origin 交回原服务器，reject 返回错误
+  # direct 的授权/签发失败仍拒绝，不能用 origin 绕过。
+  # 可选：对 STRM 内容里的 URL 按顺序匹配，替换第一条命中的首次出现；不是文件挂载映射。
+  # strm_path_map:
+  #   - "http://old-source:5244 => http://media-source.internal:5244"
+
+jellyfin:
+  enabled: false # 默认关闭；与 Emby、飞牛开关独立
+  delivery_mode: redirect # 默认源站 302；direct 需要顶层 media，不支持 relay 值
+  listen: ":8098" # 默认 :8098；客户端用此代理入口
+  # 默认也是 8096：若 Emby/Jellyfin 同机，要改为各自真实后端端口，不能让两者指向同一服务。
+  target: "http://127.0.0.1:8096"
+  cache_ttl: 60 # 分钟；省略或 <=0 继承顶层
+  proxy_error_strategy: origin # redirect 失败交回原服务器；reject 返回错误，direct 失败仍拒绝
+  # 可选 URL 替换，含义与 Emby 相同；不改变 STRM 文件在容器里的路径。
+  # strm_path_map:
+  #   - "http://old-source:5244 => http://media-source.internal:5244"

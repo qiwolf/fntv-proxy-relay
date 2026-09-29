@@ -42,3 +42,23 @@ func TestDirectExamplesLoad(t *testing.T) {
 		})
 	}
 }
+
+func TestBasicDocumentedExamplesLoad(t *testing.T) {
+	old := Global
+	defer func() { Global = old; viper.Reset() }()
+	for _, path := range []string{"config.yaml.example", "deploy/fnos/config.yaml.example"} {
+		t.Run(path, func(t *testing.T) {
+			viper.Reset()
+			Global = &Config{}
+			if err := Load(filepath.Join("..", "..", path)); err != nil {
+				t.Fatal(err)
+			}
+			if Global.Emby.Enabled || Global.Jellyfin.Enabled {
+				t.Fatal("optional adapters must remain disabled in basic examples")
+			}
+			if Global.Jellyfin.ListenAddr != ":8098" || Global.Jellyfin.GetDeliveryMode() != "redirect" {
+				t.Fatal("unexpected Jellyfin example defaults")
+			}
+		})
+	}
+}

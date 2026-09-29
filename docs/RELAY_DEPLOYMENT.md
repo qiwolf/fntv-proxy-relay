@@ -25,7 +25,7 @@
 cp config.yaml.example config.yaml
 ```
 
-最小 relay 配置：
+以下是飞牛 relay 的精简配置；包含三端逐项注释的可复制版本见 [飞牛部署配置](../deploy/fnos/config.yaml.example)，字段含义、默认值与作用范围见 [配置参数详解](CONFIGURATION.md)。Emby/Jellyfin 默认关闭，启用它们不会自动跟随飞牛的 relay 设置。
 
 ```yaml
 listen: ":28005"
@@ -41,6 +41,8 @@ allowed_strm_roots:
   - "/vol00/strm"
 
 emby:
+  enabled: false
+jellyfin:
   enabled: false
 ```
 

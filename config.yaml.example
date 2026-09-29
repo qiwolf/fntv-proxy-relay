@@ -1,12 +1,18 @@
+# 默认 /app/fntv-proxy 配置；不是 /app/fntv-unified 的 services 格式。
+# 字段详解见 docs/CONFIGURATION.md。
+# 飞牛代理监听；默认 :28005 表示所有接口，可改为 127.0.0.1:28005 限制本机访问。
 listen: ":28005"
+# 飞牛影视本体，不是代理或媒体入口；host 网络的 127.0.0.1 是宿主机，桥接网络则是代理自身。
 target: "http://127.0.0.1:8005"
+# trace/debug/info/warn/error，默认 info；详细日志可能含敏感源 URL。
 log_level: "info"
+# 进程内日志目录；容器持久保存需另加目录挂载。
 log_dir: "./logs"
 cache_ttl: 60  # 缓存过期时间（分钟），默认1小时
 
 # 兼容旧配置：proxy 只运行原代理；media 只运行专用媒体服务；all 同时运行
 role: "proxy"
-# proxy 保持现有中继；direct 返回专用媒体服务地址（必须 stream_mode: relay）
+# 仅控制飞牛：proxy 使用 stream_mode；direct 返回专用媒体服务地址（必须 stream_mode: relay）。
 delivery_mode: "proxy"
 
 # 播放模式：redirect 保持原有 302 行为；relay 由本服务流式回源
@@ -21,7 +27,8 @@ stream_mode: "redirect"
 #   - "media-cdn.example.com"
 
 # proxy/all 的 relay 模式必填；纯 media 角色不读取 STRM，不需要此项。
-# 只允许读取这些目录内的 .strm（会解析符号链接）；容器内须保持相同绝对路径并只读挂载。
+# 只允许读取这些目录内的 .strm（会解析符号链接）；填挂载右侧、即媒体服务器看到的路径。
+# 挂载左右不必相同，三端路径不同可列多项；详见 docs/STRM_MOUNTS.md。
 # allowed_strm_roots:
 #   - "/vol00/strm"
 
@@ -58,23 +65,27 @@ stream_mode: "redirect"
 # direct 仅转移可直传 STRM/远程源；实文件和转码仍由原服务器传输。
 # 客户端连接下方代理监听，不要连接 media.public_base_url。
 emby:
+  # 默认 false；true 额外启动 Emby 代理，不会关闭飞牛监听。
   enabled: false
   delivery_mode: redirect # 默认 redirect 源站 302；direct 签发媒体票据
-  listen: ":8095"
+  listen: ":8095" # 默认所有接口 8095；客户端连接此代理入口
+  # Emby 本体；若与 Jellyfin 同机，分别填写实际后端端口，不能盲用同一个 8096。
   target: "http://127.0.0.1:8096"
-  cache_ttl: 60
+  cache_ttl: 60 # 分钟；省略或 <=0 时继承顶层，不是禁用缓存
   proxy_error_strategy: "origin"  # origin: 失败回源 | reject: 返回错误
   # direct 授权/签发失败不会回退到原始源站 URL，此策略不能放宽 direct 安全检查。
-  # strm 内 URL 路径映射（可选）
+  # 可选：对 STRM 内 URL 按顺序取第一条匹配并替换首次出现；不是 Docker 文件路径映射。
   # strm_path_map:
   #   - "https://old-host:8094 => http://localhost:8095"
 
 jellyfin:
+  # 默认 false；true 额外启动 Jellyfin 代理，字段含义与 emby 对应字段相同。
   enabled: false
-  delivery_mode: redirect
+  delivery_mode: redirect # 默认源站 302；direct 使用顶层 media 签发媒体票据
   listen: ":8098" # 不得与 Emby、飞牛代理或源服务器端口冲突
   target: "http://127.0.0.1:8096" # 按实际 Jellyfin 地址修改
-  cache_ttl: 60 # 分钟，省略/0 使用顶层 cache_ttl
-  proxy_error_strategy: origin
+  cache_ttl: 60 # 分钟，省略或 <=0 继承顶层 cache_ttl
+  proxy_error_strategy: origin # redirect 失败交回原 Jellyfin；reject 返回错误，direct 失败仍拒绝
+  # URL 替换规则同 Emby，不修改文件内容或 Docker 挂载。
   # strm_path_map:
   #   - "http://old-source:5244 => http://media-source.internal:5244"

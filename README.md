@@ -28,6 +28,8 @@ docker pull ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
 
 **同一镜像内有两个程序，配置格式不能混用：**
 
+默认程序的字段、默认值、单位与三端作用范围见 [配置参数详解](docs/CONFIGURATION.md)。
+
 | 程序 | 如何启动 | 配置 |
 | --- | --- | --- |
 | `/app/fntv-proxy` | 镜像默认入口，保留旧部署 | [config.yaml.example](config.yaml.example)，顶层飞牛配置，可选 `emby` / `jellyfin` |
