@@ -10,9 +10,9 @@
 
 中文字幕 · 无旁白 · 背景配乐 · 1080P。介绍三端支持、网页配置、播放模式与机房直出。
 
-[![播放 30 秒产品介绍](docs/media/product-video-cover.jpg)](https://github.com/qiwolf/fntv-proxy-relay/releases/download/v0.9.8-relay.5/relay-product-introduction-1080p.mp4)
+https://github.com/user-attachments/assets/23b26df0-83fd-42c5-9031-b6311d41e90d
 
-[观看或下载视频](https://github.com/qiwolf/fntv-proxy-relay/releases/download/v0.9.8-relay.5/relay-product-introduction-1080p.mp4)
+[下载 1080P 视频](https://github.com/qiwolf/fntv-proxy-relay/releases/download/v0.9.8-relay.5/relay-product-introduction-1080p.mp4)
 
 ## 快速启动 Web 管理
 
