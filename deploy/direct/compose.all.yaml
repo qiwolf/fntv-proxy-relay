@@ -1,7 +1,7 @@
 services:
   all:
     # 固定正式版本；支持 amd64 / arm64
-    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.3
     # 本地构建：取消下两行注释，并将 image 改为 fntv-proxy-relay:direct-local
     # build:
     #   context: ../..

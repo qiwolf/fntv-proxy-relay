@@ -1,7 +1,7 @@
 services:
   unified-media:
     # 与主代理使用同一正式镜像和相同的统一程序入口。
-    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.3
     entrypoint: ["/app/fntv-unified"]
     # 可选源码构建：取消注释，并把 image 改成自定义本地标签。
     # build:

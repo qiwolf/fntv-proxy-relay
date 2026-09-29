@@ -1,7 +1,7 @@
 services:
   media:
     # 固定正式版本，提供 amd64 / arm64；不会运行飞牛网页代理
-    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.3
     # 本地构建：取消下两行注释，并将 image 改为 fntv-proxy-relay:direct-local
     # build:
     #   context: ../..

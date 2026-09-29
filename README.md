@@ -1,6 +1,6 @@
 # FNTV Proxy Relay
 
-为 **飞牛影视、Emby、Jellyfin** 提供 STRM 播放代理。支持源站重定向、飞牛同源中继，以及把视频传输放到另一台服务器的媒体直出。`v0.9.8-relay.2` 新增三服务统一入口：一个主代理容器处理三种协议，一个机房媒体容器共用媒体端口，各服务保留独立密钥和访问限制。
+为 **飞牛影视、Emby、Jellyfin** 提供 STRM 播放代理。支持源站重定向、飞牛同源中继，以及把视频传输放到另一台服务器的媒体直出。支持三服务统一入口：一个主代理容器处理三种协议，一个机房媒体容器共用媒体端口，各服务保留独立密钥和访问限制。`v0.9.8-relay.3` 修复 Emby/Jellyfin 浏览器播放信息压缩导致的 502，包含普通文件场景。
 
 > 本项目派生自 [jimboo7339/fntv-proxy](https://github.com/jimboo7339/fntv-proxy)。上游未提供明确 LICENSE；公开源码或容器不等于授予再分发或商业使用许可。详见 [NOTICE.md](NOTICE.md)。
 
@@ -20,10 +20,10 @@
 
 ## 镜像与两套配置入口
 
-正式版镜像：`ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2`，发布构建面向 `linux/amd64`、`linux/arm64`。生产建议固定版本，而非依赖可变的 `latest`。
+正式版镜像：`ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.3`，发布构建面向 `linux/amd64`、`linux/arm64`。生产建议固定版本，而非依赖可变的 `latest`。
 
 ```sh
-docker pull ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
+docker pull ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.3
 ```
 
 **同一镜像内有两个程序，配置格式不能混用：**
@@ -72,4 +72,4 @@ docker pull ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
 
 播放失败依次检查：是否连接主代理而非媒体端口；条目是否真正为 STRM；是否转码；挂载和允许列表；媒体证书、映射及网页 Origin。不要通过禁用证书校验或放开所有源站排错。旧 302 逻辑及调试日志可能含源站 URL，不承诺所有历史日志均脱敏；限制日志访问并在提交问题前去掉登录令牌、源站密码和完整签名 URL。
 
-版本变更见 [v0.9.8-relay.2 发布说明](docs/RELEASE_NOTES_v0.9.8-relay.2.md)。旧 `v0.9.8-relay.2-rc.1` 不包含 Emby/Jellyfin 直出及统一程序。Git 标签是固定快照，请使用与镜像对应的标签文档，不要把主分支新配置直接用于旧镜像。
+版本变更见 [v0.9.8-relay.3 发布说明](docs/RELEASE_NOTES_v0.9.8-relay.3.md)。旧 `v0.9.8-relay.2-rc.1` 不包含 Emby/Jellyfin 直出及统一程序。Git 标签是固定快照，请使用与镜像对应的标签文档，不要把主分支新配置直接用于旧镜像。

@@ -96,6 +96,12 @@ func (s *Server) Handler() http.Handler {
 		s.proxy.Director = func(req *http.Request) {
 			originalDirector(req)
 			req.Host = s.targetURL.Host
+			// PlaybackInfo is inspected and may be rewritten. Do not negotiate
+			// browser encodings (for example Brotli) that our parser cannot decode.
+			// Other responses, including media streams, retain normal negotiation.
+			if isPlaybackInfoRequest(req) {
+				req.Header.Set("Accept-Encoding", "identity")
+			}
 		}
 		s.proxy.ModifyResponse = s.handleResponse
 	})

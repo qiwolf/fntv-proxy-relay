@@ -2,7 +2,7 @@ name: fntv-proxy-relay
 
 services:
   fntv-proxy-relay:
-    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.3
     # 可选：用预先交叉编译的 fntv-proxy-relay 文件构建运行镜像。
     # 启用前将 image 改成本地标签。
     # build:

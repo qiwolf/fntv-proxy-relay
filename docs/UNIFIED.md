@@ -1,6 +1,6 @@
 # 三服务统一代理部署指南
 
-适用于正式版 `v0.9.8-relay.2`。同一镜像 `ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2` 包含默认程序 `/app/fntv-proxy` 和显式选择的统一程序 `/app/fntv-unified`。统一 Compose 必须设置 `entrypoint: ["/app/fntv-unified"]`；默认程序不读取本指南的 `services` 配置。旧 RC 镜像不包含统一程序。现场已完成飞牛、Emby、Jellyfin 三端 STRM 实际播放与数据流核对，但仍需在自己的客户端和网络验收。
+适用于正式版 `v0.9.8-relay.3`。同一镜像 `ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.3` 包含默认程序 `/app/fntv-proxy` 和显式选择的统一程序 `/app/fntv-unified`。统一 Compose 必须设置 `entrypoint: ["/app/fntv-unified"]`；默认程序不读取本指南的 `services` 配置。旧 RC 镜像不包含统一程序。现场已完成飞牛、Emby、Jellyfin 三端 STRM 实际播放与数据流核对，但仍需在自己的客户端和网络验收。
 
 ## 合并边界
 
@@ -46,7 +46,7 @@ chmod 600 secrets/*.key
 分别在 NAS 和机房创建独立部署目录，从同一版本的 `deploy/unified/` 复制对应 Compose 与 YAML 示例。两端使用同一正式镜像，无需安装 Go 或本地构建：
 
 ```sh
-docker pull ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
+docker pull ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.3
 ```
 
 Compose 样例使用 Linux 的 host 网络，文件相对路径以各自 Compose 所在目录为准；启动前检查所有监听端口空闲。若使用桥接网络，需要自行发布相应端口，且 `127.0.0.1` 不再代表宿主机。两端各有自己的 `config.yaml`，不能将主代理配置原样放到媒体节点。

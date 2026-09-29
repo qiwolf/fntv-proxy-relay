@@ -1,6 +1,6 @@
 services:
   jellyfin-direct-proxy:
-    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.3
     # 可选源码构建；启用时将 image 改成本地标签。
     # build:
     #   context: ../..

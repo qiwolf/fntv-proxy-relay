@@ -1,7 +1,7 @@
 services:
   unified-proxy:
     # 正式镜像同时包含传统代理和统一代理；统一配置必须选择此 entrypoint。
-    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.2
+    image: ghcr.io/qiwolf/fntv-proxy-relay:0.9.8-relay.3
     entrypoint: ["/app/fntv-unified"]
     # 可选源码构建：取消注释，并把 image 改成自定义本地标签。
     # build:
