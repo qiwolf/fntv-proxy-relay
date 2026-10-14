@@ -21,20 +21,31 @@ import (
 
 // Server 代理服务器
 type Server struct {
-	config          *config.Config
-	logger          *logger.Logger
-	cache           *cache.Cache
-	playbackHandler *handler.PlaybackHandler
-	streamHandler   *handler.StreamHandler
-	proxy           *httputil.ReverseProxy
-	mediaHandler    *handler.MediaHandler
-	httpServer      *http.Server
-	mu              sync.Mutex
-	servers         []*http.Server
-	stopping        bool
-	started         bool
-	stopCache       sync.Once
-	prepareOnce     sync.Once
+	config           *config.Config
+	logger           *logger.Logger
+	cache            *cache.Cache
+	playbackHandler  *handler.PlaybackHandler
+	streamHandler    *handler.StreamHandler
+	proxy            *httputil.ReverseProxy
+	mediaHandler     *handler.MediaHandler
+	httpServer       *http.Server
+	mu               sync.Mutex
+	servers          []*http.Server
+	stopping         bool
+	started          bool
+	stopCache        sync.Once
+	prepareOnce      sync.Once
+	playbackObserver func(playbackResponseObservation)
+}
+
+type requestStartedKey struct{}
+
+type playbackResponseObservation struct {
+	StatusCode          int
+	RequestContentBytes int64
+	BodyBytes           int64
+	Elapsed             time.Duration
+	Outcome             string
 }
 
 // NewServer 创建代理服务器
@@ -249,6 +260,10 @@ func (s *Server) handleResponse(resp *http.Response) error {
 	if !s.isPlaybackInfoRequest(resp.Request) {
 		return nil
 	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		s.observePlaybackResponse(resp, resp.ContentLength, "passthrough_non_2xx")
+		return nil
+	}
 
 	// 读取响应体（PlaybackInfo 数据量小，可以安全读取）
 	body, err := io.ReadAll(resp.Body)
@@ -256,6 +271,11 @@ func (s *Server) handleResponse(resp *http.Response) error {
 		return err
 	}
 	resp.Body.Close()
+	if len(bytes.TrimSpace(body)) == 0 {
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		s.observePlaybackResponse(resp, int64(len(body)), "passthrough_empty")
+		return nil
+	}
 
 	// trace级别：记录响应体
 	if s.logger.GetLevel() <= logger.TraceLevel {
@@ -268,7 +288,27 @@ func (s *Server) handleResponse(resp *http.Response) error {
 		s.logger.Error("处理PlaybackInfo失败: %v", err)
 	}
 	resp.Body = io.NopCloser(bytes.NewBuffer(newBody))
+	s.observePlaybackResponse(resp, int64(len(body)), "inspected_nonempty")
 	return nil
+}
+
+func (s *Server) observePlaybackResponse(resp *http.Response, bodyBytes int64, outcome string) {
+	var elapsed time.Duration
+	if resp != nil && resp.Request != nil {
+		if started, ok := resp.Request.Context().Value(requestStartedKey{}).(time.Time); ok {
+			elapsed = time.Since(started)
+		}
+	}
+	requestContentBytes := int64(-1)
+	if resp != nil && resp.Request != nil {
+		requestContentBytes = resp.Request.ContentLength
+	}
+	observation := playbackResponseObservation{StatusCode: resp.StatusCode, RequestContentBytes: requestContentBytes, BodyBytes: bodyBytes, Elapsed: elapsed, Outcome: outcome}
+	// Deliberately omit URL, item ID, query, headers and body.
+	s.logger.Info("PlaybackInfo response status=%d request_content_bytes=%d response_bytes=%d elapsed_ms=%d outcome=%s", observation.StatusCode, observation.RequestContentBytes, observation.BodyBytes, observation.Elapsed.Milliseconds(), observation.Outcome)
+	if s.playbackObserver != nil {
+		s.playbackObserver(observation)
+	}
 }
 
 func (s *Server) isStreamAPIRequest(req *http.Request) bool {
@@ -311,6 +351,7 @@ func contains(s, substr string) bool {
 // loggingMiddleware 日志中间件
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(context.WithValue(r.Context(), requestStartedKey{}, time.Now()))
 		// 记录请求（debug级别）
 		s.logger.Debug("请求: %s %s", r.Method, safeRequestPath(r))
 
