@@ -73,6 +73,10 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	ph := handler.NewPlaybackHandler(c, log)
 	sh := handler.NewStreamHandler(c, log, cfg.GetStreamMode(), cfg.GetAllowedUpstreams(), cfg.GetAllowedStrmRoots(), cfg.GetPublicBaseURL())
 	sh.SetSTRMDirectoryMap(cfg.GetSTRMDirectoryMap())
+	if err := sh.SetStreamAPIRelativeBase(cfg.GetStreamAPIRelativeBaseURL()); err != nil {
+		c.Stop()
+		return nil, err
+	}
 
 	// 创建反向代理
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)

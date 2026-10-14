@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -23,15 +24,16 @@ const relayPathPrefix = "/fntv-relay/"
 // StreamHandler handles FNTV stream requests either by legacy redirect or by
 // relaying bytes from the URL stored in the .strm file.
 type StreamHandler struct {
-	cache            *cache.Cache
-	logger           *logger.Logger
-	client           *http.Client
-	mode             string
-	allowedUpstreams map[string]struct{}
-	allowedStrmRoots []string
-	strmDirectoryMap []config.STRMDirectoryMapping
-	publicBaseURL    string
-	directURL        func(string) (string, error)
+	cache                 *cache.Cache
+	logger                *logger.Logger
+	client                *http.Client
+	mode                  string
+	allowedUpstreams      map[string]struct{}
+	allowedStrmRoots      []string
+	strmDirectoryMap      []config.STRMDirectoryMapping
+	publicBaseURL         string
+	directURL             func(string) (string, error)
+	streamAPIRelativeBase *url.URL
 }
 
 // SetDirectRelay selects an external media gateway. Configure before serving.
@@ -42,6 +44,28 @@ func (h *StreamHandler) SetDirectRelay(issue func(string) (string, error)) {
 // SetSTRMDirectoryMap must be called before serving requests.
 func (h *StreamHandler) SetSTRMDirectoryMap(m []config.STRMDirectoryMapping) {
 	h.strmDirectoryMap = append([]config.STRMDirectoryMapping(nil), m...)
+}
+
+// SetStreamAPIRelativeBase sets the only origin that may resolve fnOS
+// root-relative media-range URLs. The origin itself must already be in the
+// existing upstream allowlist; this does not expand SSRF authority.
+func (h *StreamHandler) SetStreamAPIRelativeBase(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		h.streamAPIRelativeBase = nil
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || u.RawPath != "" {
+		return fmt.Errorf("stream_api_relative_base_url must be an allowlisted HTTP(S) origin without credentials, path, query or fragment")
+	}
+	if !h.isAllowedURL(u) {
+		return fmt.Errorf("stream_api_relative_base_url host must be present in allowed_upstreams")
+	}
+	base := *u
+	base.Path = "/"
+	h.streamAPIRelativeBase = &base
+	return nil
 }
 
 func NewStreamHandler(c *cache.Cache, l *logger.Logger, mode string, allowedUpstreams, allowedStrmRoots []string, publicBaseURL ...string) *StreamHandler {
@@ -245,15 +269,23 @@ func (h *StreamHandler) rewriteJSONURLs(value *any, rewritten map[string]string)
 		return total, nil
 	case string:
 		parsed, err := url.Parse(current)
-		if err != nil || !h.isAllowedURL(parsed) {
+		if err != nil {
 			return 0, nil
+		}
+		candidate := current
+		if !h.isAllowedURL(parsed) {
+			resolved, ok := h.resolveStreamAPIRelativeURL(current, parsed)
+			if !ok {
+				return 0, nil
+			}
+			candidate = resolved.String()
 		}
 		if replacement, ok := rewritten[current]; ok {
 			*value = replacement
 			return 1, nil
 		}
 		if h.directURL != nil {
-			replacement, err := h.directURL(current)
+			replacement, err := h.directURL(candidate)
 			if err != nil {
 				return 0, err
 			}
@@ -270,7 +302,7 @@ func (h *StreamHandler) rewriteJSONURLs(value *any, rewritten map[string]string)
 		if h.publicBaseURL == "" {
 			replacement = relayPathPrefix + token
 		}
-		h.cache.SetStreamURL("api:"+token, current)
+		h.cache.SetStreamURL("api:"+token, candidate)
 		rewritten[current] = replacement
 		*value = replacement
 		return 1, nil
@@ -282,6 +314,25 @@ func (h *StreamHandler) rewriteJSONURLs(value *any, rewritten map[string]string)
 // ReadAllowedStrm applies the same root and symlink restrictions to other issuers.
 func (h *StreamHandler) ReadAllowedStrm(path string) (string, error) {
 	return h.readStrm(path, true)
+}
+
+func (h *StreamHandler) resolveStreamAPIRelativeURL(raw string, parsed *url.URL) (*url.URL, bool) {
+	if h.streamAPIRelativeBase == nil || parsed == nil || raw == "" {
+		return nil, false
+	}
+	// Only the known fnOS root-relative media endpoint is eligible. Reject
+	// network-path references, path confusion, encoded paths and fragments.
+	if !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") || strings.Contains(raw, "\\") || parsed.IsAbs() || parsed.Host != "" || parsed.User != nil || parsed.Opaque != "" || parsed.Fragment != "" || parsed.RawPath != "" {
+		return nil, false
+	}
+	if pathpkg.Clean(parsed.Path) != parsed.Path || !strings.HasPrefix(parsed.Path, "/v/api/v1/media/range/") {
+		return nil, false
+	}
+	resolved := h.streamAPIRelativeBase.ResolveReference(parsed)
+	if resolved.Scheme != h.streamAPIRelativeBase.Scheme || !strings.EqualFold(resolved.Host, h.streamAPIRelativeBase.Host) || !h.isAllowedURL(resolved) {
+		return nil, false
+	}
+	return resolved, true
 }
 
 func (h *StreamHandler) readStrm(path string, enforceRoots bool) (string, error) {

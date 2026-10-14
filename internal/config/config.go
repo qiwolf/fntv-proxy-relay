@@ -13,23 +13,24 @@ import (
 
 // Config 配置结构
 type Config struct {
-	FNTVEnabled      *bool                  `mapstructure:"fntv_enabled"`
-	Role             string                 `mapstructure:"role"`
-	DeliveryMode     string                 `mapstructure:"delivery_mode"`
-	Media            MediaConfig            `mapstructure:"media"`
-	ListenAddr       string                 `mapstructure:"listen"`
-	TargetAddr       string                 `mapstructure:"target"`
-	LogLevel         string                 `mapstructure:"log_level"`
-	LogDir           string                 `mapstructure:"log_dir"`
-	CacheTTL         time.Duration          `mapstructure:"cache_ttl"` // 直链缓存 TTL（复用原有配置名）
-	StreamMode       string                 `mapstructure:"stream_mode"`
-	AllowedUpstreams []string               `mapstructure:"allowed_upstreams"`
-	AllowedStrmRoots []string               `mapstructure:"allowed_strm_roots"`
-	STRMDirectoryMap []STRMDirectoryMapping `mapstructure:"strm_directory_map"`
-	PublicBaseURL    string                 `mapstructure:"public_base_url"`
-	Emby             EmbyConfig             `mapstructure:"emby"`
-	Jellyfin         EmbyConfig             `mapstructure:"jellyfin"`
-	mutex            sync.RWMutex
+	FNTVEnabled              *bool                  `mapstructure:"fntv_enabled"`
+	Role                     string                 `mapstructure:"role"`
+	DeliveryMode             string                 `mapstructure:"delivery_mode"`
+	Media                    MediaConfig            `mapstructure:"media"`
+	ListenAddr               string                 `mapstructure:"listen"`
+	TargetAddr               string                 `mapstructure:"target"`
+	LogLevel                 string                 `mapstructure:"log_level"`
+	LogDir                   string                 `mapstructure:"log_dir"`
+	CacheTTL                 time.Duration          `mapstructure:"cache_ttl"` // 直链缓存 TTL（复用原有配置名）
+	StreamMode               string                 `mapstructure:"stream_mode"`
+	AllowedUpstreams         []string               `mapstructure:"allowed_upstreams"`
+	AllowedStrmRoots         []string               `mapstructure:"allowed_strm_roots"`
+	STRMDirectoryMap         []STRMDirectoryMapping `mapstructure:"strm_directory_map"`
+	PublicBaseURL            string                 `mapstructure:"public_base_url"`
+	Emby                     EmbyConfig             `mapstructure:"emby"`
+	Jellyfin                 EmbyConfig             `mapstructure:"jellyfin"`
+	StreamAPIRelativeBaseURL string                 `mapstructure:"stream_api_relative_base_url"`
+	mutex                    sync.RWMutex
 }
 
 // GetFNTVEnabled preserves existing deployments that omit this new setting.
@@ -71,7 +72,7 @@ func Load(configPath string) error {
 	viper.SetDefault("media.state_dir", "./data/media")
 	viper.SetDefault("media.token_ttl_seconds", 3600)
 	viper.SetDefault("media.allow_http", false)
-	for _, key := range []string{"allowed_upstreams", "allowed_strm_roots", "public_base_url", "media.public_base_url", "media.token_key", "media.token_key_file", "media.tls_cert_file", "media.tls_key_file", "media.allowed_origins"} {
+	for _, key := range []string{"allowed_upstreams", "allowed_strm_roots", "public_base_url", "stream_api_relative_base_url", "media.public_base_url", "media.token_key", "media.token_key_file", "media.tls_cert_file", "media.tls_key_file", "media.allowed_origins"} {
 		if err := viper.BindEnv(key); err != nil {
 			return err
 		}
@@ -233,6 +234,12 @@ func (c *Config) GetPublicBaseURL() string {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 	return strings.TrimRight(strings.TrimSpace(c.PublicBaseURL), "/")
+}
+
+func (c *Config) GetStreamAPIRelativeBaseURL() string {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	return strings.TrimSpace(c.StreamAPIRelativeBaseURL)
 }
 
 // Validate rejects unsafe relay configurations before the listener starts.

@@ -224,6 +224,89 @@ func TestRewriteFnOSStreamAPIAndRelayRange(t *testing.T) {
 	}
 }
 
+func TestRewriteFnOSRelativeMediaRangeUsesExplicitAllowlistedBase(t *testing.T) {
+	c := cache.NewWithTTL(time.Minute)
+	t.Cleanup(c.Stop)
+	h := NewStreamHandler(c, logger.New("error", ""), "relay", []string{"fnos.internal:8005"}, []string{t.TempDir()})
+	var issued string
+	h.SetDirectRelay(func(raw string) (string, error) {
+		issued = raw
+		return "https://media.example/fntv-media/opaque-ticket", nil
+	})
+	body := []byte(`{"url":"/v/api/v1/media/range/movie?token=secret"}`)
+
+	unchanged, count, err := h.RewriteStreamAPIResponse(body)
+	if err != nil || count != 0 || string(unchanged) != string(body) || issued != "" {
+		t.Fatalf("relative URL rewritten without explicit base: count=%d issued=%q err=%v", count, issued, err)
+	}
+	if err := h.SetStreamAPIRelativeBase("http://fnos.internal:8005"); err != nil {
+		t.Fatal(err)
+	}
+	rewritten, count, err := h.RewriteStreamAPIResponse(body)
+	if err != nil || count != 1 {
+		t.Fatalf("rewrite count=%d err=%v", count, err)
+	}
+	if issued != "http://fnos.internal:8005/v/api/v1/media/range/movie?token=secret" {
+		t.Fatalf("issuer target = %q", issued)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(rewritten, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["url"] != "https://media.example/fntv-media/opaque-ticket" {
+		t.Fatalf("rewritten URL = %q", payload["url"])
+	}
+}
+
+func TestRelativeMediaRangeRejectsConfusedPathsAndUntrustedHosts(t *testing.T) {
+	c := cache.NewWithTTL(time.Minute)
+	t.Cleanup(c.Stop)
+	h := NewStreamHandler(c, logger.New("error", ""), "relay", []string{"fnos.internal:8005"}, []string{t.TempDir()})
+	if err := h.SetStreamAPIRelativeBase("http://fnos.internal:8005"); err != nil {
+		t.Fatal(err)
+	}
+	issued := 0
+	h.SetDirectRelay(func(raw string) (string, error) {
+		issued++
+		return "https://media.example/fntv-media/opaque-ticket", nil
+	})
+	for _, raw := range []string{
+		"//evil.example/v/api/v1/media/range/movie",
+		"/v/api/v1/media/range/../admin",
+		"/v/api/v1/media/range/%2e%2e/admin",
+		"/v/api/v1/other/movie",
+		"v/api/v1/media/range/movie",
+		"/v/api/v1/media/range/movie#fragment",
+		"http://evil.example/v/api/v1/media/range/movie",
+	} {
+		body, _ := json.Marshal(map[string]string{"url": raw})
+		got, count, err := h.RewriteStreamAPIResponse(body)
+		if err != nil || count != 0 || string(got) != string(body) {
+			t.Errorf("unsafe URL %q: count=%d err=%v body=%s", raw, count, err, got)
+		}
+	}
+	if issued != 0 {
+		t.Fatalf("issuer called %d times for rejected URLs", issued)
+	}
+}
+
+func TestRelativeMediaBaseMustBeNarrowAllowlistedOrigin(t *testing.T) {
+	c := cache.NewWithTTL(time.Minute)
+	t.Cleanup(c.Stop)
+	h := NewStreamHandler(c, logger.New("error", ""), "relay", []string{"fnos.internal:8005"}, []string{t.TempDir()})
+	for _, raw := range []string{
+		"http://evil.example:8005",
+		"http://user:pass@fnos.internal:8005",
+		"http://fnos.internal:8005/base",
+		"http://fnos.internal:8005?token=secret",
+		"file:///etc/passwd",
+	} {
+		if err := h.SetStreamAPIRelativeBase(raw); err == nil {
+			t.Errorf("unsafe base %q accepted", raw)
+		}
+	}
+}
+
 func newRelayHandler(t *testing.T, upstreamURL string) (*StreamHandler, string) {
 	t.Helper()
 	u, err := url.Parse(upstreamURL)

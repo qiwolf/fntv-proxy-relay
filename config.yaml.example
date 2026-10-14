@@ -21,6 +21,15 @@ stream_mode: "redirect"
 # fnOS 0.9.8 /v/api/v1/stream 直链改写后对外返回的基础 URL；留空则使用相对路径
 # public_base_url: "https://fn.example.com"
 
+# 可选：仅用于解析 /v/api/v1/stream 响应中的根相对媒体地址。
+# 必须是无凭据、无路径/query/fragment 的内网 HTTP(S) origin，且 host:port
+# 已显式列入 allowed_upstreams；不会使用客户端 Host 或响应内容推导 origin。
+# stream_api_relative_base_url: "http://fnos.internal:8005"
+# 默认必须留空。fnOS 返回的 `/v/api/v1/media/range/...` 是 fnOS 自身媒体接口，
+# 并不等于 `.strm` 中的 CloudDrive2 源地址；把 base 指向 fnOS 只会让媒体网关
+# 回源 fnOS，不会变成 CloudDrive2 直链。指向公网 tv origin 还会回绕反向代理。
+# 只有确认媒体节点到该内网 origin 的路由、认证、Range 行为和拓扑目标后才可启用。
+
 # relay 模式必填。每一次重定向都会检查 host[:port]
 # allowed_upstreams:
 #   - "192.168.1.20:5244"

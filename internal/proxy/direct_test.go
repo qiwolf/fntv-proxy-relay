@@ -246,6 +246,39 @@ func TestLegacyRedirectModePreservesNativeAPIURL(t *testing.T) {
 	}
 }
 
+func TestDirectAPIRelativeBaseWiringAndValidation(t *testing.T) {
+	cfg := directConfig(t, "http://fnos.internal:8005")
+	cfg.StreamAPIRelativeBaseURL = "http://fnos.internal:8005"
+	s := directServer(t, cfg)
+	response := &http.Response{
+		StatusCode: http.StatusOK,
+		Request:    httptest.NewRequest(http.MethodPost, "/v/api/v1/stream", nil),
+		Body:       io.NopCloser(strings.NewReader(`{"url":"/v/api/v1/media/range/movie?token=secret"}`)),
+		Header:     make(http.Header),
+	}
+	if err := s.handleResponse(response); err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(payload["url"], "http://media.example/fntv-media/") || strings.Contains(payload["url"], "secret") {
+		t.Fatalf("relative response did not become opaque ticket: %q", payload["url"])
+	}
+
+	bad := directConfig(t, "http://fnos.internal:8005")
+	bad.StreamAPIRelativeBaseURL = "http://evil.internal:8005"
+	if server, err := NewServer(bad); err == nil {
+		_ = server.Stop()
+		t.Fatal("non-allowlisted relative base was accepted")
+	}
+}
+
 func TestAllRoleActualDualListeners(t *testing.T) {
 	media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Range") != "bytes=1-3" {
